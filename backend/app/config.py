@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     # --- WordPress ---
     wordpress_base_url: str = "https://www.furnish-luxe.com"
-    wordpress_username: str = ""
-    wordpress_app_password: str = ""
+    wordpress_username: str = "admin"
+    wordpress_app_password: str = "SSqy ZKaM 1wbd lwVZ PZ6r BYQI"
 
     # --- Pinterest ---
     pinterest_access_token: str | None = None
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # --- App behavior ---
     images_per_article: int = 8
     h2_sections_per_article: int = 8
-    request_timeout_seconds: int = 60
+    request_timeout_seconds: int = 25
 
 
 settings = Settings()

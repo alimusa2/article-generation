@@ -30,67 +30,58 @@ _jobs: dict[str, JobResult] = {}
 
 async def _execute_pipeline(job_id: str, title: str):
     """
-    Executes the entire n8n workflow pipeline faithfully step-by-step:
-    1. write the article (Gemini models/gemini-3.5-flash-lite)
-    2. generate seo meta data (OpenRouter openrouter/free)
-    3. Basic LLM Chain: generate image prompts (OpenRouter openrouter/free)
-    4. Generate image (Cloudflare Workers AI @cf/black-forest-labs/flux-1-schnell, 1-by-1 @ 2000ms delay)
-    5. Code in JavaScript -> Upload to Cloudinary -> Label Image File -> HTTP Request -> media node1
-    6. Code in JavaScript2 -> upload node (WordPress post creation as draft)
-    7. Code in JavaScript1 -> HTTP Request1 (Pinterest Sandbox pin creation per image)
+    Executes the entire article generation workflow:
+    1. Write article (Gemini)
+    2. Generate SEO metadata & Image prompts in parallel (OpenRouter)
+    3. Generate 8 section images in parallel (Cloudflare Workers AI)
+    4. Cloudinary upload & WP media upload in parallel
+    5. Draft post creation on WordPress & Pinterest pinning
     """
     job = _jobs[job_id]
     try:
         # Step 1: Article Generation
-        job.status = JobStatus.writing_article
-        article_html = await article_service.generate_article(title)
-        job.article_html = article_html
+        if not job.article_html:
+            job.status = JobStatus.writing_article
+            article_html = await article_service.generate_article(title)
+            job.article_html = article_html
+        else:
+            article_html = job.article_html
 
-        # Step 2: SEO Metadata Generation
-        job.status = JobStatus.generating_seo
-        job.seo, raw_seo_text = await seo_service.generate_seo_metadata(article_html)
+        # Step 2 & 3: Parallelized SEO & Image Prompt Generation
+        if not job.seo or not job.images:
+            job.status = JobStatus.generating_seo
+            (seo_tuple, prompts) = await asyncio.gather(
+                seo_service.generate_seo_metadata(article_html),
+                image_prompt_service.generate_image_prompts(title, article_html)
+            )
+            job.seo, raw_seo_text = seo_tuple
+        else:
+            raw_seo_text = ""
+            prompts = [img.prompt for img in job.images]
 
-        # Step 3: Image Prompt Generation
-        job.status = JobStatus.generating_image_prompts
-        prompts = await image_prompt_service.generate_image_prompts(title, article_html)
+        # Step 4: Parallel Image Generation (Cloudflare Workers AI)
+        if not job.images:
+            job.status = JobStatus.generating_images
+            image_bytes_list = await image_gen_service.generate_images(prompts)
 
-        # Step 4: Sequential Image Generation (Cloudflare Workers AI)
-        job.status = JobStatus.generating_images
-        image_bytes_list = await image_gen_service.generate_images(prompts)
-
-        # Step 5: Cloudinary Upload + AVIF Rewrite + WP Media Upload
-        job.status = JobStatus.uploading_images
-        media_urls: list[str] = []
-        media_ids: list[int] = []
-        # Raw Cloudinary URLs (secure_url || url) from 'Upload to Cloudinary' step (Addendum 1)
-        raw_cloudinary_urls: list[str] = []
-
-        for idx, (prompt, img_bytes) in enumerate(zip(prompts, image_bytes_list), start=1):
-            # Cloudinary upload
-            c_res = await cloudinary_service.upload_image(img_bytes, title, idx)
-            # The raw Cloudinary URL used strictly for Pinterest (matching n8n 'Code in JavaScript1')
-            raw_c_url = c_res.get("secure_url") or c_res.get("url", "")
-            raw_cloudinary_urls.append(raw_c_url)
-
-            # The separate avif_url used strictly for WordPress media upload (matching n8n 'HTTP Request')
-            avif_url = c_res.get("avif_url", "")
-
-            # WordPress media upload (if WP credentials configured)
-            media_id = 0
-            media_url = avif_url
-            if settings.wordpress_username and settings.wordpress_app_password:
-                try:
-                    wp_media = await wordpress_service.upload_media_from_url(avif_url)
-                    media_id = wp_media.get("id", 0)
-                    media_url = wp_media.get("url", avif_url)
-                except Exception as wp_err:
-                    logger.warning("WordPress media upload failed, using AVIF URL fallback: %s", wp_err)
-
-            media_ids.append(media_id)
-            media_urls.append(media_url)
-
-            job.images.append(
-                GeneratedImage(
+            # Step 5: Parallel Cloudinary Upload + AVIF Rewrite + WP Media Upload
+            job.status = JobStatus.uploading_images
+            
+            async def _upload_single(idx: int, prompt: str, img_bytes: bytes):
+                c_res = await cloudinary_service.upload_image(img_bytes, title, idx)
+                raw_c_url = c_res.get("secure_url") or c_res.get("url", "")
+                avif_url = c_res.get("avif_url", "")
+                media_id = 0
+                media_url = avif_url
+                if settings.wordpress_username and settings.wordpress_app_password:
+                    try:
+                        wp_media = await wordpress_service.upload_media_from_url(avif_url)
+                        media_id = wp_media.get("id", 0)
+                        media_url = wp_media.get("url", avif_url)
+                    except Exception as wp_err:
+                        logger.warning("WordPress media upload failed: %s", wp_err)
+                
+                return GeneratedImage(
                     prompt=prompt,
                     image_index=idx,
                     cloudinary_url=raw_c_url,
@@ -98,48 +89,59 @@ async def _execute_pipeline(job_id: str, title: str):
                     wordpress_media_id=media_id,
                     wordpress_media_url=media_url,
                 )
-            )
+
+            upload_tasks = [
+                _upload_single(idx, prompt, img_bytes)
+                for idx, (prompt, img_bytes) in enumerate(zip(prompts, image_bytes_list), start=1)
+            ]
+            job.images = list(await asyncio.gather(*upload_tasks))
+
+        media_ids = [img.wordpress_media_id or 0 for img in job.images]
+        media_urls = [img.wordpress_media_url or img.avif_url for img in job.images]
+        raw_cloudinary_urls = [img.cloudinary_url for img in job.images if img.cloudinary_url]
 
         # Step 6: WordPress Post Creation (Draft)
-        job.status = JobStatus.publishing_wordpress
-        featured_media_id = media_ids[0] if media_ids else 0
-        formatted_content = wordpress_service.replace_image_placeholders(article_html, media_urls)
-        job.formatted_content = formatted_content
+        if not job.wordpress_post_id:
+            job.status = JobStatus.publishing_wordpress
+            featured_media_id = media_ids[0] if media_ids else 0
+            formatted_content = wordpress_service.replace_image_placeholders(article_html, media_urls)
+            job.formatted_content = formatted_content
 
-        if settings.wordpress_username and settings.wordpress_app_password:
-            try:
-                post = await wordpress_service.create_post(
-                    title=title,
-                    content_html=formatted_content,
-                    featured_media_id=featured_media_id,
-                    seo=job.seo,
-                )
-                job.wordpress_post_id = post.get("id")
-                job.wordpress_post_link = post.get("link")
-            except Exception as wp_post_err:
-                logger.warning("WordPress post creation failed: %s", wp_post_err)
-        else:
-            logger.info("WordPress credentials not configured; article formatted with AVIF images directly.")
+            if settings.wordpress_username and settings.wordpress_app_password:
+                try:
+                    post = await wordpress_service.create_post(
+                        title=title,
+                        content_html=formatted_content,
+                        featured_media_id=featured_media_id,
+                        seo=job.seo,
+                    )
+                    job.wordpress_post_id = post.get("id")
+                    job.wordpress_post_link = post.get("link")
+                except Exception as wp_post_err:
+                    logger.warning("WordPress post creation failed: %s", wp_post_err)
+            else:
+                logger.info("WordPress credentials not configured; article formatted with AVIF images directly.")
 
-        # Step 7: Pinterest Sandbox Pins (fan-out per Cloudinary image)
-        job.status = JobStatus.publishing_pinterest
-        wp_link = job.wordpress_post_link or ""
+        # Step 7: Pinterest Sandbox Pins
+        if not job.pinterest_pins:
+            job.status = JobStatus.publishing_pinterest
+            wp_link = job.wordpress_post_link or ""
 
-        if settings.pinterest_access_token:
-            try:
-                pin_results = await pinterest_service.create_pins_for_images(
-                    title=title,
-                    wp_link=wp_link,
-                    raw_seo_text=raw_seo_text,
-                    cloudinary_image_urls=raw_cloudinary_urls,
-                )
-                job.pinterest_pins = pin_results
-                if pin_results and isinstance(pin_results[0], dict) and "id" in pin_results[0]:
-                    job.pinterest_pin_id = str(pin_results[0]["id"])
-            except Exception as pin_err:
-                logger.warning("Pinterest pin creation failed: %s", pin_err)
-        else:
-            logger.info("Pinterest access token not configured; skipping pin creation.")
+            if settings.pinterest_access_token:
+                try:
+                    pin_results = await pinterest_service.create_pins_for_images(
+                        title=title,
+                        wp_link=wp_link,
+                        raw_seo_text=raw_seo_text,
+                        cloudinary_image_urls=raw_cloudinary_urls,
+                    )
+                    job.pinterest_pins = pin_results
+                    if pin_results and isinstance(pin_results[0], dict) and "id" in pin_results[0]:
+                        job.pinterest_pin_id = str(pin_results[0]["id"])
+                except Exception as pin_err:
+                    logger.warning("Pinterest pin creation failed: %s", pin_err)
+            else:
+                logger.info("Pinterest access token not configured; skipping pin creation.")
 
         job.status = JobStatus.completed
         logger.info("Pipeline completed successfully for job %s", job_id)
@@ -159,20 +161,19 @@ async def run_pipeline(
     sync: bool = Query(False, description="Run synchronously instead of in background"),
 ) -> JobResult:
     """
-    Starts the full article generation and publishing pipeline.
-    Instantly returns JobResult so the HTTP POST request completes in < 50ms, avoiding serverless timeouts.
+    Executes the full article generation and publishing pipeline.
+    Completes within Vercel's serverless function time window.
     """
     job_id = str(uuid.uuid4())
     job = JobResult(job_id=job_id, status=JobStatus.pending, title=req.title)
     _jobs[job_id] = job
 
-    if sync:
-        await _execute_pipeline(job_id, req.title)
-        return job
+    try:
+        await asyncio.wait_for(_execute_pipeline(job_id, req.title), timeout=11.0)
+    except asyncio.TimeoutError:
+        logger.info("Pipeline run_pipeline reached 11s ceiling; polling will continue advancing job %s", job_id)
 
-    # Schedule pipeline execution asynchronously without blocking the HTTP response
-    asyncio.create_task(_execute_pipeline(job_id, req.title))
-    return job
+    return _jobs[job_id]
 
 
 @router.get("/jobs/{job_id}", response_model=JobResult)
@@ -182,7 +183,14 @@ async def get_job(job_id: str) -> JobResult:
         if _jobs:
             return list(_jobs.values())[-1]
         return JobResult(job_id=job_id, status=JobStatus.completed, title="Article Generation Job")
-    return job
+
+    if job.status not in (JobStatus.completed, JobStatus.failed):
+        try:
+            await asyncio.wait_for(_execute_pipeline(job_id, job.title), timeout=8.0)
+        except asyncio.TimeoutError:
+            pass
+
+    return _jobs[job_id]
 
 
 @router.get("/jobs", response_model=list[JobResult])

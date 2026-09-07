@@ -4,15 +4,11 @@ import logging
 import re
 import httpx
 from PIL import Image
-import pillow_heif
-from app.config import settings
-
-logger = logging.getLogger("cloudinary_service")
-
-# Register pillow-heif for local AVIF encoding
 try:
+    import pillow_heif
     pillow_heif.register_heif_opener()
 except Exception as e:
+    pillow_heif = None
     logger.warning("Could not register pillow_heif opener: %s", e)
 
 
