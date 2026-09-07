@@ -23,6 +23,10 @@
       "dest": "api/index.py"
     },
     {
+      "src": "/health",
+      "dest": "api/index.py"
+    },
+    {
       "src": "/openapi.json",
       "dest": "api/index.py"
     },

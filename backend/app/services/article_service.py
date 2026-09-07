@@ -17,7 +17,7 @@ Before drafting, think through:
 - Base every H2/H3 heading on this research. Never use vague, content-free headings like "Sunset-Inspired Palette" with nothing behind them — every heading must answer a real question or describe a specific, useful idea.
 
 STEP 2 — STRUCTURE
-- Word count: 1000-1200 words total.
+- Word count: 800-900 words total (concise, high-density advice).
 - Intro (80-120 words): hook the reader, state what they'll get from the article, briefly establish why this topic/color/style matters.
 - Exactly 8 H2 sections, each built around one specific, researched idea — never a repeated template. Each section includes:
   - The specific idea/technique — name actual colors, materials, furniture types, or styles (never vague terms like "warm tones" alone).
