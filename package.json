@@ -1,0 +1,17 @@
+{
+  "name": "furnish-luxe-article-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Furnish Luxe Article Automation Pipeline and Editorial Review Desk",
+  "scripts": {
+    "dev:backend": "python -m uvicorn app.main:app --port 8000 --app-dir backend --env-file backend/.env",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev": "concurrently --kill-others-on-fail -n \"backend,frontend\" -c \"cyan,green\" \"python -m uvicorn app.main:app --port 8000 --app-dir backend --env-file backend/.env\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix frontend run build",
+    "test:backend": "cd backend && python -m pytest -v",
+    "test": "cd backend && python -m pytest -v"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

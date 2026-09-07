@@ -1,0 +1,49 @@
+import re
+from app.config import settings
+from app.services.seo_service import _call_openrouter
+from app.utils.parsing import extract_prompt_list
+
+IMAGE_PROMPT_SYSTEM_PROMPT = """You are an expert interior design photographer and prompt engineer for luxury home decor magazines like Architectural Digest and Elle Decor.
+
+YOUR MISSION:
+Read the provided 8 H2 article sections. For each H2 section in order (1 through 8), create ONE hyper-specific, realistic editorial photography prompt.
+
+STRICT RELEVANCE & QUALITY RULES:
+1. 100% RELEVANCE TO H2: Every image prompt MUST directly and accurately feature the exact primary subject, specific furniture piece, material, color, or lighting mentioned in that specific H2 heading. (e.g. If H2 1 is about "Terracotta Wall Accents", prompt 1 MUST be a luxury shot of a terracotta-accented wall; if H2 2 is about "Velvet Tufted Headboards", prompt 2 MUST feature a velvet tufted headboard — never generic plants, empty shelves, or random items).
+2. PREMIUM EDITORIAL PHOTOGRAPHY STYLE: Every prompt must specify: "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling".
+3. SPECIFIC DECOR ELEMENTS: Describe exact textures, materials (linen, white oak, brushed brass, travertine, velvet), colors, and composition.
+4. NO TEXT / LOGOS / PEOPLE: Do not include on-screen text, brand logos, signs, or human faces.
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array of exactly 8 strings, one per H2 section in order (1 to 8).
+"""
+
+
+def _extract_h2_sections(article_html: str) -> list[str]:
+    """Extracts H2 section titles and text snippets to ensure 1:1 section relevance."""
+    matches = re.findall(
+        r"<h2[^>]*>(.*?)</h2>\s*(.*?)(?=<h2|$)", article_html, re.DOTALL | re.IGNORECASE
+    )
+    section_texts = []
+    for idx, (h2, content) in enumerate(matches, start=1):
+        clean_title = re.sub(r"<[^>]+>", "", h2).strip()
+        clean_content = re.sub(r"<[^>]+>", " ", content).strip()
+        clean_content = re.sub(r"\s+", " ", clean_content)[:250]
+        if clean_title:
+            section_texts.append(f"Section {idx} H2: {clean_title}\nContext: {clean_content}")
+
+    return section_texts
+
+
+async def generate_image_prompts(title: str, article_html: str) -> list[str]:
+    sections = _extract_h2_sections(article_html)
+    sections_formatted = "\n\n".join(sections) if sections else article_html
+
+    user_prompt = (
+        f"Generate exactly {settings.images_per_article} image prompts for this blog article.\n"
+        f"ARTICLE TITLE: {title}\n\n"
+        f"THE 8 H2 SECTIONS:\n{sections_formatted}\n\n"
+        f"Remember: Output ONLY a JSON array of 8 strings, matching each section in 1:1 order."
+    )
+    raw = await _call_openrouter(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
+    return extract_prompt_list(raw, expected_count=settings.images_per_article)

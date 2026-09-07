@@ -1,0 +1,679 @@
+{
+  "name": "article genertion fireplace",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write the complete article now, following all system rules exactly, for this title/keyword:\n{{ $json.Title }}\n\nThe article must have exactly 8 H2 sections and exactly 8 [image space] placeholders. Return only the final HTML article.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are an experienced home decor writer and interior stylist writing for Furnish Luxe, with hands-on experience designing and renovating real bedrooms, living rooms, and other home spaces. You write to rank on Google — not just to sound pretty.\n\nGOAL\nWrite an article that outranks generic competitor content by being more specific, more useful, and more trustworthy — not just better written.\n\nSTEP 1 — RESEARCH BEFORE WRITING (reflect this in the content, don't show it separately)\nBefore drafting, think through:\n- What is the searcher actually trying to accomplish? (redecorating on a budget, matching a style, small space, renters, a specific room type)\n- What related questions do people search? (e.g. \"what colors go with X\", \"is X good for a bedroom\", \"does X make a room look smaller\")\n- What sub-topics would a real buyer or decorator guide expect? (color palettes, furniture, lighting, textures, small-space tips, mistakes to avoid, cost)\n- Base every H2/H3 heading on this research. Never use vague, content-free headings like \"Sunset-Inspired Palette\" with nothing behind them — every heading must answer a real question or describe a specific, useful idea.\n\nSTEP 2 — STRUCTURE\n- Word count: 1000-1200 words total.\n- Intro (80-120 words): hook the reader, state what they'll get from the article, briefly establish why this topic/color/style matters.\n- Exactly 8 H2 sections, each built around one specific, researched idea — never a repeated template. Each section includes:\n  - The specific idea/technique — name actual colors, materials, furniture types, or styles (never vague terms like \"warm tones\" alone).\n  - Why it works — real design reasoning, not just description.\n  - One practical, actionable tip — a cost-saving swap, a common mistake to avoid, a small-space/renter adaptation, or a pairing suggestion.\n- One short FAQ section (3-4 Q&As) near the end, using real questions people search for on this topic.\n- Short conclusion (60-100 words) summarizing the article with one clear next step or encouragement.\n\nIMAGE PLACEMENTS\nThe article must contain exactly 8 image placeholders — one after each of the 8 H2 sections' full description (idea + reasoning + tip), before the next heading. Format each one exactly like this, on its own line:\n[image space]\nDo not place a placeholder in the intro, the FAQ, or the conclusion. Do not add more or fewer than 8 — this count is a hard requirement since 8 H2 sections is also a hard requirement.\n\nSTEP 3 — TONE & WORDING\n- Simple, warm, conversational — explain like you're talking to a friend, not writing for a design magazine.\n- Short sentences and paragraphs: 2-4 sentences max per paragraph.\n- No fluffy openers like \"Imagine stepping into a room that transports you...\" — get to useful information quickly.\n- No jargon without a plain-language explanation.\n\nSTEP 4 — E-E-A-T (this is critical — most competitor articles fail here)\n- Experience: include 2-3 lines per section that sound first-hand and practical (e.g. \"if your room doesn't get much natural light, go with a warmer coral-orange rather than a saturated neon shade — it won't look muddy at night\").\n- Expertise: name specific colors (e.g. \"terracotta,\" \"burnt sienna,\" \"clay orange\"), materials, or design principles (color theory, the 60-30-10 rule, proportion) where relevant.\n- Authoritativeness: reference known design movements or eras by name where useful (mid-century modern, Mediterranean, boho) to show real design knowledge.\n- Trustworthiness: give balanced advice — say when an idea won't work well (e.g. \"avoid this in small, dark rooms\" / \"this works best with good natural light\"). Never make unverifiable claims.\n\nSTEP 5 — FORMATTING OUTPUT\n- Output clean HTML: h1 for the title, h2 for each section heading, h3 only if a section needs a genuine sub-point, p for paragraphs.\n- Bold key terms sparingly for scannability (use <strong>, never bold inside headings).\n- FAQ section: h2 \"Frequently Asked Questions,\" then each question as h3 starting with \"Q:\" and the answer as a p starting with \"A:\".\n- No markdown, no code fences, no text outside the HTML.\n\nBefore finishing, verify: word count is 1000-1200, there are exactly 8 H2 sections, exactly 8 [image space] placeholders exist (one per section, none elsewhere), headings are research-driven, and at least one first-hand-sounding line appears per section."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -1232,
+        176
+      ],
+      "id": "01a5b122-478e-4dc3-9db7-48d88f70b8c1",
+      "name": "write the article",
+      "alwaysOutputData": false,
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# Article SEO Metadata Request\n\nGenerate SEO metadata for the following article.\n\nARTICLE CONTENT:\n\n{{ $('write the article').item.json.text }}\n\nAnalyze the complete article to identify its title, main topic, primary keyword, search intent, and related keywords.\n\nReturn only the JSON object specified in the system instructions.\n",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "# SEO Metadata Generator\n\nYou are an SEO metadata specialist. Your task is to analyze the provided article and generate accurate, search-optimized metadata based ONLY on the information contained in the article.\n\nThe article itself contains the title and topic information. Identify the main topic and primary search keyword naturally from the article. Do not invent a keyword unrelated to the article.\n\n## SEO TITLE\n\n* 50-60 characters.\n* Include the main keyword naturally, preferably near the beginning.\n* Make it compelling and relevant to the article's search intent.\n* Do not simply copy the article title if it does not meet the requirements.\n* Use Title Case.\n* Avoid keyword stuffing.\n\n## META DESCRIPTION\n\n* 150-160 characters.\n* Include the main keyword naturally within the first 110 characters when possible.\n* Clearly explain the value of the article.\n* Make it compelling and action-oriented.\n* Must accurately reflect the article.\n* Do not copy or closely reproduce the article's opening paragraph.\n* Never use generic filler.\n\n## URL SLUG\n\n* Maximum 75 characters.\n* Lowercase only.\n* Words separated with hyphens.\n* No special characters.\n* Include the main keyword when practical.\n* Remove unnecessary stop words while keeping the slug readable.\n\n## FOCUS KEYPHRASE\n\n* 1-2 words only.\n* Lowercase.\n* Select the primary search phrase that best represents the article's main topic.\n* Base it on the article content.\n\n## SECONDARY KEYWORDS\n\n* Return 3-5 related keywords or search phrases.\n* Lowercase only.\n* No duplicates.\n* No trailing punctuation.\n* Use terms genuinely related to the article.\n\n## IMPORTANT OUTPUT RULES\n\nReturn ONLY one valid JSON object.\n\nUse exactly these five keys and no others:\n\n{\n\"seo_title\": \"\",\n\"meta_description\": \"\",\n\"url_slug\": \"\",\n\"focus_keyphrase\": \"\",\n\"secondary_keywords\": []\n}\n\nDo not use Markdown.\nDo not use code fences.\nDo not add explanations.\nDo not add text before or after the JSON.\n\nThe article may be long. Analyze it and generate only the metadata. Do not reproduce the article.\n\nIf some information is unclear, make the best reasonable decision based on the article instead of refusing to respond.\n\nAlways return a JSON object. Never return an empty response.\n\nBefore returning, ensure:\n\n* seo_title is between 50 and 60 characters\n* meta_description is between 150 and 160 characters\n* url_slug is under 75 characters\n* focus_keyphrase contains 1-2 words\n* secondary_keywords contains 3-5 items\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -880,
+        336
+      ],
+      "id": "ae8aec09-098d-4f47-ad7e-6eedaf4781c0",
+      "name": "generate seo meta data",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "html": "{{ $json.text }}"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -816,
+        32
+      ],
+      "id": "f8f787e2-d90e-467b-ad7f-19da46336017",
+      "name": "HTML1"
+    },
+    {
+      "parameters": {
+        "formTitle": "Article generation",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Title",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -1456,
+        176
+      ],
+      "id": "3f034ff2-03d8-47f4-a35d-8d038e7a73cd",
+      "name": "On form submission",
+      "webhookId": "6b9618bd-c9d6-4a4f-b322-8c3fee61ad0b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ================================================\n// 1. EXTRACT MEDIA URLS & IDS FROM INPUT\n// ================================================\nlet mediaUrls = [];\nlet mediaIds = [];\nlet featuredMediaId = 0;\n\ntry {\n  const inputItems = $input.all();\n  mediaUrls = inputItems.map(item => item.json?.guid?.rendered || item.json?.source_url || item.json?.url).filter(Boolean);\n  mediaIds = inputItems.map(item => item.json?.id).filter(Boolean);\n  \n  if (mediaIds.length > 0) {\n    featuredMediaId = mediaIds[0];\n  }\n} catch (e) {\n  // Fallbacks stay empty\n}\n\n// ================================================\n// 2. EXTRACT ARTICLE CONTENT FROM 'write the article'\n// ================================================\nlet rawArticleText = '';\ntry {\n  rawArticleText = $('write the article').first()?.json?.text || '';\n} catch (e) {\n  rawArticleText = '';\n}\n\n// ================================================\n// 3. EXTRACT SEO TITLE & METADATA\n// ================================================\nlet seoTitle = '';\nlet metaDesc = '';\ntry {\n  const seoData = $('generate seo meta data').first()?.json || {};\n  const seoObj = (seoData.output && typeof seoData.output === 'object') ? seoData.output : seoData;\n  seoTitle = seoObj.title || '';\n  metaDesc = seoObj.meta_description || seoObj.description || '';\n} catch (e) {\n  seoTitle = '';\n  metaDesc = '';\n}\n\n// ================================================\n// 4. REPLACE PLACEHOLDERS WITH RESPONSIVE IMAGES\n// ================================================\nlet formattedContent = rawArticleText;\nif (mediaUrls.length > 0 && formattedContent) {\n  let imageIndex = 0;\n  formattedContent = formattedContent.replace(/\\[image\\s*space\\]|\\[image[^\\]]*\\]/gi, () => {\n    if (imageIndex < mediaUrls.length) {\n      const url = mediaUrls[imageIndex];\n      imageIndex++;\n      return `<figure class=\"wp-block-image\"><img src=\"${url}\" alt=\"Article Image ${imageIndex}\" style=\"max-width:100%;height:auto;display:block;margin:0 auto;\" /></figure>`;\n    }\n    return '';\n  });\n}\n\n// Catch-all: If HTML <img> tags already exist in the text without inline width constraints, enforce responsive styling\nif (formattedContent) {\n  formattedContent = formattedContent.replace(/<img (?!.*?style=)/gi, '<img style=\"max-width:100%;height:auto;display:block;margin:0 auto;\" ');\n}\n\n// ================================================\n// 5. OUTPUT SINGLE PAYLOAD FOR WORDPRESS\n// ================================================\nreturn [{\n  json: {\n    title: seoTitle,\n    content: formattedContent,\n    status: 'draft',\n    featured_media: featuredMediaId,\n    meta: {\n      _yoast_wpseo_metadesc: metaDesc,\n      _rank_math_description: metaDesc\n    },\n    all_media_ids: mediaIds,\n    all_media_urls: mediaUrls\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        336
+      ],
+      "id": "e9f095f5-66e8-464b-8fa2-6633ee89548b",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.furnish-luxe.com/wp-json/wp/v2/posts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "featured_image_id",
+              "value": "={{ $json.featured_media }}"
+            },
+            {
+              "name": "status",
+              "value": "draft"
+            },
+            {
+              "name": "meta",
+              "value": "={{ $json.meta }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $('On form submission').item.json.Title }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1616,
+        336
+      ],
+      "id": "72809aaf-3d0a-444a-bdf5-7dffa777f89e",
+      "name": "upload node",
+      "credentials": {
+        "wordpressApi": {
+          "id": "sSJyrqwAtRqWg7bP",
+          "name": "Wordpress account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -1152,
+        416
+      ],
+      "id": "b142e2be-1474-4e37-9fe7-1043b8a45f37",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "mqhHbttrLfDeFmBb",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retrieve output string or object from previous node\nlet raw = $input.first().json.text || $input.first().json.output || $input.first().json.content || $input.first().json || '';\nlet prompts = [];\n\n// If the output is already an array of strings or objects\nif (Array.isArray(raw)) {\n  prompts = raw.map(p => typeof p === 'object' ? (p.prompt || JSON.stringify(p)) : p);\n} else {\n  // Convert object to string if necessary\n  if (typeof raw === 'object') {\n    raw = JSON.stringify(raw);\n  }\n\n  // 1. Clean markdown code fences\n  let clean = raw.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();\n\n  // 2. Try JSON Parsing first\n  try {\n    const match = clean.match(/\\[[\\s\\S]*\\]/);\n    const parsed = JSON.parse(match ? match[0] : clean);\n    if (Array.isArray(parsed)) {\n      prompts = parsed;\n    }\n  } catch (e) {\n    // 3. Regex fallback: Find text enclosed in double quotes\n    const stringMatches = [...clean.matchAll(/\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"/g)];\n    if (stringMatches.length > 0) {\n      prompts = stringMatches.map(m => m[1]);\n    }\n  }\n\n  // 4. Line-by-line fallback: Split text lines (handles numbered/bulleted lists & plain text)\n  if (prompts.length === 0) {\n    prompts = clean\n      .split('\\n')\n      .map(p => p.replace(/^[\\d+.\\-* ]+/, '').trim()) // Strip list numbers/bullets\n      .filter(p => p.length > 0 && !p.startsWith('{') && !p.startsWith('['));\n  }\n}\n\n// 5. Ultimate Fallback: If everything else fails, use the whole text as 1 prompt\nif (!Array.isArray(prompts) || prompts.length === 0) {\n  if (typeof raw === 'string' && raw.trim().length > 0) {\n    prompts = [raw.trim()];\n  } else {\n    prompts = ['Default image prompt']; // Guaranteed non-empty output\n  }\n}\n\n// Output each prompt as an individual n8n item\nreturn prompts.map((prompt, index) => ({\n  json: { prompt: String(prompt), imageIndex: index + 1 }\n}));"
+      },
+      "id": "4a957503-c236-4e05-9faa-a75846b6c999",
+      "name": "Split Image Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop through all items coming from Cloudinary\nreturn $input.all().map(item => {\n  const originalUrl = item.json.secure_url;\n  \n  // Strip .jpg/.jpeg/.png extension and force Cloudinary f_avif delivery\n  const cleanUrl = originalUrl.replace(/\\.(jpg|jpeg|png)$/i, '.avif');\n  const avifUrl = cleanUrl.replace('/upload/', '/upload/f_avif/');\n  \n  return {\n    json: {\n      ...item.json,\n      avif_url: avifUrl\n    }\n  };\n});"
+      },
+      "id": "4adc0d84-b3ca-420d-8478-cda60a68898f",
+      "name": "Label Image File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Generate 8 image prompts for this blog article.\n{{ $('On form submission').item.json.Title }}\n\nArticle content:\n{{ $('write the article').item.json.text }}\n\nReturn only the JSON array as specified.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are an image prompt generator for a blog illustration pipeline. Your only job is to read a blog article's title and content, then produce exactly 8 distinct image generation prompts that visually match different parts of the article — one prompt per image placeholder in the article, in the same order they appear.  STRICT ROLE - You do not write article content, captions, or commentary. - You do not explain your reasoning. - You output ONLY the JSON array specified below — nothing else.  RULES FOR EACH IMAGE PROMPT - Each prompt describes one specific visual scene tied to the section of the article it corresponds to (introduction, a specific H2 topic, a list item, the comparison table concept, the conclusion, etc.) — not 8 generic variations of the same idea. - Each prompt must be self-contained: written as a standalone visual description, not referencing \"the article\" or \"image 3.\" - Style: realistic, high-quality, professional blog/editorial photography or clean illustration — specify this explicitly in every prompt (e.g. \"professional editorial photograph, natural lighting\" or \"clean flat-style illustration, soft color palette\"). - No text, letters, numbers, logos, or watermarks in the described image — Cloudflare AI image models render text poorly, so never ask for on-image text. - No real people, celebrities, or brand logos. - Each prompt should be 1-3 sentences, specific enough to guide a diffusion model (mention subject, setting, mood, lighting, composition) but not overloaded with contradictory detail. - Prompts must progress logically with the article: prompt 1 relates to the introduction/opening concept, prompt 8 relates to the final thoughts/closing concept, and prompts 2-7 map to the main sections in order.  OUTPUT FORMAT Return ONLY a valid JSON array of exactly 8 strings, nothing else. No markdown, no code fences, no keys, no explanation.  Example format (do NOT copy these values, use as structure reference only): [   \"Professional editorial photograph of a modern smart home control panel glowing softly at dusk, minimalist interior, warm ambient lighting.\",   \"Clean flat-style illustration of a solar panel array on a suburban rooftop under a clear blue sky, bright and optimistic color palette.\",   ... ]  Before returning, verify: the array has exactly 8 elements, each is a complete standalone image prompt, none contain requests for text/logos/people, and there is no content outside the JSON array."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -528,
+        336
+      ],
+      "id": "9bfe1a50-872c-403e-8d61-5ee595b03d4e",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "openrouter/free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        560
+      ],
+      "id": "547e3428-7cd1-4b21-a6ca-e3fccbeea987",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "YAAzTiuIjigKFv9x",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloudflare.com/client/v4/accounts/fced45df4ca8bedd3adbcece223c161c/ai/run/@cf/black-forest-labs/flux-1-schnell",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_CLOUDFLARE_API_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, steps: 4 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "adce8fa7-9a08-448f-a6e8-05e2772b9feb",
+      "name": "Generate image (Cloudflare Workers AI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const base64Data = item.json.result.image;\n  return {\n    json: {\n      fileName: `blog-image-${index + 1}.png`\n    },\n    binary: {\n      data: {\n        data: base64Data,\n        mimeType: 'image/png',\n        fileName: `blog-image-${index + 1}.png`\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        336
+      ],
+      "id": "50937ec2-7135-4424-a5a3-54efae6d33ce",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloudinary.com/v1_1/rnxglwci/image/upload",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "public_id",
+              "value": "={{ $('On form submission').item.json.Title.toLowerCase().replace(/[^a-z0-9]/g, '-') }}-{{ $position + 1 }}"
+            },
+            {
+              "name": "upload_preset",
+              "value": "my_preset_name"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c8bd1dfa-ffbe-434c-9953-e1e7a650c634",
+      "name": "Upload to Cloudinary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        496,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.avif_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        944,
+        336
+      ],
+      "id": "6bd007fd-a6fc-463b-9ea3-ad5c00170ade",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.furnish-luxe.com/wp-json/wp/v2/media",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Disposition",
+              "value": "attachment; filename=image.avif"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/avif"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        336
+      ],
+      "id": "a68ea176-13bb-4a5e-97c3-23cc52a200c3",
+      "name": "media node1",
+      "credentials": {
+        "wordpressApi": {
+          "id": "sSJyrqwAtRqWg7bP",
+          "name": "Wordpress account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api-sandbox.pinterest.com/v5/pins",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_PINTEREST_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"board_id\": \"1086423178800607052\",\n  \"title\": {{ JSON.stringify($('On form submission').item.json.Title.trim()) }},\n  \"link\": {{ JSON.stringify($json.wp_link) }},\n  \"description\": {{ JSON.stringify(JSON.parse($('generate seo meta data').item.json.text.replace(/```json|```/g, '').trim()).meta_description) }},\n  \"media_source\": {\n    \"source_type\": \"image_url\",\n    \"url\": {{ JSON.stringify($json.image_url) }}\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1504,
+        544
+      ],
+      "id": "e8484c8b-7113-4de2-87a6-4e0fa810485b",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const wpLink = $('upload node').first().json.link;\nconst cloudinaryItems = $('Upload to Cloudinary').all();\n\nreturn cloudinaryItems.map(item => {\n  return {\n    json: {\n      image_url: item.json.secure_url || item.json.url,\n      wp_link: wpLink\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        528
+      ],
+      "id": "8110a5a4-9dd8-49c8-a330-690a5af67994",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "model": "openrouter/free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        480
+      ],
+      "id": "555020ef-defa-4b9e-a841-cb618ffa07c8",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "fMYGOwJ966ydb1gt",
+          "name": "Unnamed credential"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "write the article": {
+      "main": [
+        [
+          {
+            "node": "generate seo meta data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "write the article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generate seo meta data": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "upload node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "write the article",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Image Prompts": {
+      "main": [
+        [
+          {
+            "node": "Generate image (Cloudflare Workers AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Split Image Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate image (Cloudflare Workers AI)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Upload to Cloudinary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Cloudinary": {
+      "main": [
+        [
+          {
+            "node": "Label Image File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Image File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "media node1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "media node1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML1": {
+      "main": [
+        []
+      ]
+    },
+    "upload node": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "generate seo meta data",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "dff4bb25-6528-42cc-99d9-cbe3568ba753",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "98c82c27bd8c8eed1b521e46e27b032243ca5475f6890a8938ef939fae64a684"
+  },
+  "nodeGroups": [],
+  "id": "VciSrzWWvm5oFwwe",
+  "tags": []
+}
