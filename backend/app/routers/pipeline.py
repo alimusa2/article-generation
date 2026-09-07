@@ -160,19 +160,18 @@ async def run_pipeline(
 ) -> JobResult:
     """
     Starts the full article generation and publishing pipeline.
-    Runs synchronously on Vercel serverless environment to prevent background task freeze,
-    or in async background mode on local server.
+    Instantly returns JobResult so the HTTP POST request completes in < 50ms, avoiding serverless timeouts.
     """
     job_id = str(uuid.uuid4())
     job = JobResult(job_id=job_id, status=JobStatus.pending, title=req.title)
     _jobs[job_id] = job
 
-    is_vercel = bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV"))
-    if sync or is_vercel:
+    if sync:
         await _execute_pipeline(job_id, req.title)
         return job
 
-    background_tasks.add_task(_execute_pipeline, job_id, req.title)
+    # Schedule pipeline execution asynchronously without blocking the HTTP response
+    asyncio.create_task(_execute_pipeline(job_id, req.title))
     return job
 
 
