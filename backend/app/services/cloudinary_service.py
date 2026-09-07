@@ -4,6 +4,10 @@ import logging
 import re
 import httpx
 from PIL import Image
+from app.config import settings
+
+logger = logging.getLogger("cloudinary_service")
+
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
