@@ -17,15 +17,20 @@ except Exception as e:
 
 
 def convert_bytes_to_avif_data_url(image_bytes: bytes) -> str:
-    """Converts raw image bytes to AVIF format using Pillow + pillow_heif and returns a Base64 Data URL."""
+    """Converts raw image bytes to AVIF or WebP format using Pillow."""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
     out = io.BytesIO()
-    img.save(out, format="AVIF", quality=80)
+    mime = "image/avif"
+    try:
+        img.save(out, format="AVIF", quality=80)
+    except Exception:
+        img.save(out, format="WEBP", quality=85)
+        mime = "image/webp"
     avif_bytes = out.getvalue()
     b64 = base64.b64encode(avif_bytes).decode("utf-8")
-    return f"data:image/avif;base64,{b64}"
+    return f"data:{mime};base64,{b64}"
 
 
 def _compute_public_id(title: str, index: int) -> str:
