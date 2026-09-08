@@ -1,7 +1,11 @@
 import re
+import logging
+import httpx
 from app.config import settings
 from app.services.seo_service import _call_openrouter
 from app.utils.parsing import extract_prompt_list
+
+logger = logging.getLogger("image_prompt_service")
 
 IMAGE_PROMPT_SYSTEM_PROMPT = """You are an expert interior design photographer and prompt engineer for luxury home decor magazines like Architectural Digest and Elle Decor.
 
@@ -35,6 +39,41 @@ def _extract_h2_sections(article_html: str) -> list[str]:
     return section_texts
 
 
+async def _call_groq(system_prompt: str, user_prompt: str) -> str:
+    """Calls Groq API using settings.groq_api_key and settings.groq_model."""
+    if settings.groq_api_key:
+        model = settings.groq_model or "llama-3.3-70b-versatile"
+        headers = {
+            "Authorization": f"Bearer {settings.groq_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.5,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                if content:
+                    logger.info("Successfully generated image prompts using Groq model '%s'", model)
+                    return content
+        except Exception as err:
+            logger.warning("Groq API call error: %s. Falling back to OpenRouter/Gemini...", err)
+
+    return await _call_openrouter(system_prompt, user_prompt)
+
+
 async def generate_image_prompts(title: str, article_html: str) -> list[str]:
     sections = _extract_h2_sections(article_html)
     sections_formatted = "\n\n".join(sections) if sections else article_html
@@ -45,5 +84,5 @@ async def generate_image_prompts(title: str, article_html: str) -> list[str]:
         f"THE 8 H2 SECTIONS:\n{sections_formatted}\n\n"
         f"Remember: Output ONLY a JSON array of 8 strings, matching each section in 1:1 order."
     )
-    raw = await _call_openrouter(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
+    raw = await _call_groq(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
     return extract_prompt_list(raw, expected_count=settings.images_per_article)

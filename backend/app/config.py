@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "openrouter/free"
 
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
     # --- Cloudflare Workers AI (image generation) ---
     cloudflare_account_id: str = ""
     cloudflare_api_token: str = ""
