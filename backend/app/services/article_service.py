@@ -55,7 +55,12 @@ Before finishing, verify: word count is 1000-1200, there are exactly 8 H2 sectio
 @external_call_retry
 async def generate_article(title: str) -> str:
     """Calls Gemini and returns the raw HTML article (same shape as n8n's `.text` output)."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/{settings.gemini_model}:generateContent"
+    model_name = settings.gemini_model or "gemini-1.5-flash"
+    if "3.5-flash-lite" in model_name:
+        model_name = "gemini-1.5-flash"
+    model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
     payload = {
         "system_instruction": {"parts": [{"text": ARTICLE_SYSTEM_PROMPT}]},
         "contents": [

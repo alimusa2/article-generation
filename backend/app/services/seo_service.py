@@ -92,8 +92,28 @@ import asyncio
 logger = logging.getLogger("seo_service")
 
 
+OPENROUTER_FREE_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-2-9b-it:free",
+    "deepseek/deepseek-r1:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "openrouter/free",
+]
+
+
+def _get_gemini_model_path() -> str:
+    model_name = settings.gemini_model or "gemini-1.5-flash"
+    if "3.5-flash-lite" in model_name:
+        model_name = "gemini-1.5-flash"
+    if not model_name.startswith("models/"):
+        return f"models/{model_name}"
+    return model_name
+
+
 async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/{settings.gemini_model}:generateContent"
+    model_path = _get_gemini_model_path()
+    url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [
@@ -112,20 +132,32 @@ async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
 
 async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     """
-    Calls OpenRouter with backoff on HTTP 429 Too Many Requests.
-    Falls back to Gemini API if OpenRouter fails or continues to rate limit.
+    Calls OpenRouter by rotating through free models if HTTP 429 occurs.
+    Includes recommended OpenRouter headers.
+    Falls back to Gemini API if all OpenRouter models are rate limited or fail.
     """
     if settings.openrouter_api_key:
-        max_retries = 3
-        backoff_delays = [2.0, 4.0, 6.0]
-        for attempt in range(max_retries):
+        models_to_try = []
+        if settings.openrouter_model and settings.openrouter_model not in OPENROUTER_FREE_MODELS:
+            models_to_try.append(settings.openrouter_model)
+        for m in OPENROUTER_FREE_MODELS:
+            if m not in models_to_try:
+                models_to_try.append(m)
+
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/alimusa2/article-generation",
+            "X-Title": "Article Generation Desk",
+        }
+
+        for model in models_to_try:
             try:
                 async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                     resp = await client.post(
                         "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+                        headers=headers,
                         json={
-                            "model": settings.openrouter_model,
+                            "model": model,
                             "messages": [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt},
@@ -133,25 +165,29 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
                         },
                     )
                     if resp.status_code == 429:
-                        logger.warning("OpenRouter returned 429 (attempt %d/%d). Retrying...", attempt + 1, max_retries)
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(backoff_delays[attempt])
-                            continue
+                        logger.warning("OpenRouter model '%s' returned 429. Trying next free model...", model)
+                        await asyncio.sleep(0.5)
+                        continue
                     resp.raise_for_status()
                     data = resp.json()
-                    return data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"]
+                    if content:
+                        logger.info("Successfully generated response using OpenRouter model '%s'", model)
+                        return content
             except Exception as err:
-                logger.warning("OpenRouter call error (attempt %d/%d): %s", attempt + 1, max_retries, err)
-                if attempt < max_retries - 1 and isinstance(err, httpx.HTTPStatusError) and err.response.status_code == 429:
-                    await asyncio.sleep(backoff_delays[attempt])
-                    continue
-                break
+                logger.warning("OpenRouter model '%s' error: %s. Trying next model...", model, err)
+                await asyncio.sleep(0.5)
+                continue
 
     if settings.gemini_api_key:
         logger.info("Using Gemini fallback for LLM request")
-        return await _call_gemini_fallback(system_prompt, user_prompt)
+        try:
+            return await _call_gemini_fallback(system_prompt, user_prompt)
+        except Exception as gemini_err:
+            logger.error("Gemini fallback also failed: %s", gemini_err)
+            raise gemini_err
 
-    raise RuntimeError("Both OpenRouter and Gemini API calls failed or missing API keys.")
+    raise RuntimeError("All OpenRouter free models and Gemini API calls failed.")
 
 
 async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:
