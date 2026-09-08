@@ -42,7 +42,7 @@ def _extract_h2_sections(article_html: str) -> list[str]:
 async def _call_groq(system_prompt: str, user_prompt: str) -> str:
     """Calls Groq API using settings.groq_api_key and settings.groq_model."""
     if settings.groq_api_key:
-        model = settings.groq_model or "llama-3.3-70b-versatile"
+        model = settings.groq_model or "openai/gpt-oss-20b"
         headers = {
             "Authorization": f"Bearer {settings.groq_api_key}",
             "Content-Type": "application/json",
