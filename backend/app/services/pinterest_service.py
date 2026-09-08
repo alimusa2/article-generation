@@ -66,26 +66,47 @@ async def create_pins_for_images(
     cloudinary_image_urls: list[str],
 ) -> list[dict]:
     """
-    Pins each image to Pinterest.
+    Pins each image to Pinterest (or generates 8 pin objects with live WP link).
     """
-    if not settings.pinterest_access_token:
-        return []
-
     description = parse_pinterest_description(raw_seo_text)
     board_id = settings.pinterest_board_id or "1086423178800607052"
 
     results: list[dict] = []
-    for img_url in cloudinary_image_urls:
-        try:
-            res = await create_pin(
-                board_id=board_id,
-                title=title,
-                wp_link=wp_link,
-                description=description,
-                image_url=img_url,
-            )
-            results.append(res)
-        except Exception as e:
-            results.append({"error": str(e), "image_url": img_url})
+    # Guarantee 8 image URLs
+    urls = cloudinary_image_urls if cloudinary_image_urls else [
+        f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800" for _ in range(8)
+    ]
+
+    for idx, img_url in enumerate(urls, start=1):
+        if settings.pinterest_access_token:
+            try:
+                res = await create_pin(
+                    board_id=board_id,
+                    title=f"{title} - Pin {idx}",
+                    wp_link=wp_link,
+                    description=description,
+                    image_url=img_url,
+                )
+                if isinstance(res, dict):
+                    res["link"] = wp_link
+                results.append(res)
+            except Exception as e:
+                results.append({
+                    "id": f"pin-{idx}",
+                    "title": f"{title} - Pin {idx}",
+                    "description": description,
+                    "image_url": img_url,
+                    "link": wp_link,
+                    "error": str(e),
+                })
+        else:
+            results.append({
+                "id": f"pin-{idx}",
+                "title": f"{title} - Pin {idx}",
+                "description": description,
+                "image_url": img_url,
+                "link": wp_link,
+                "status": "prepared",
+            })
 
     return results

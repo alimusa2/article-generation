@@ -34,9 +34,10 @@ async def upload_media_from_url(avif_url: str) -> dict:
             img_resp.raise_for_status()
             img_content = img_resp.content
 
+    base_url = settings.wordpress_base_url.rstrip('/')
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
         upload_resp = await client.post(
-            f"{settings.wordpress_base_url}/wp-json/wp/v2/media",
+            f"{base_url}/wp-json/wp/v2/media",
             headers={
                 **_auth_header(),
                 "Content-Disposition": "attachment; filename=image.avif",
@@ -97,10 +98,6 @@ def replace_image_placeholders(article_html: str, media_urls: list[str]) -> str:
     return formatted_content
 
 
-# In the original n8n workflow:
-# Node: 'upload node'
-# URL: https://www.furnish-luxe.com/wp-json/wp/v2/posts
-# retryOnFail: false (no retry decorator applied)
 async def create_post(
     title: str,
     content_html: str,
@@ -109,31 +106,24 @@ async def create_post(
 ) -> dict:
     """
     Creates a WordPress draft post.
-    NOTE / FLAGGED BUG:
-    1. The n8n JSON sets 'featured_image_id': $json.featured_media. Standard WordPress REST API
-       expects 'featured_media'. We preserve 'featured_image_id' as written in the original JSON.
-    2. The n8n JSON sets 'title': $('On form submission').item.json.Title, using the original form
-       title rather than the generated SEO title. We preserve this exact behavior.
+    Sends both 'featured_media' and 'featured_image_id' for maximum compatibility with WP REST API & plugins.
     """
+    base_url = settings.wordpress_base_url.rstrip('/')
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
         payload = {
-            # In n8n JSON: 'title': $('On form submission').item.json.Title
             "title": title,
-            # In n8n JSON: 'content': $json.content
             "content": content_html,
-            # In n8n JSON: 'status': 'draft'
             "status": "draft",
-            # FLAGGED BUG: Standard WP REST API uses 'featured_media', but n8n JSON explicitly specifies 'featured_image_id'
+            "featured_media": featured_media_id,
             "featured_image_id": featured_media_id,
-            # In n8n JSON: 'meta': { _yoast_wpseo_metadesc: metaDesc, _rank_math_description: metaDesc }
             "meta": {
-                "_yoast_wpseo_metadesc": seo.meta_description,
-                "_rank_math_description": seo.meta_description,
+                "_yoast_wpseo_metadesc": seo.meta_description if seo else "",
+                "_rank_math_description": seo.meta_description if seo else "",
             },
         }
 
         resp = await client.post(
-            f"{settings.wordpress_base_url}/wp-json/wp/v2/posts",
+            f"{base_url}/wp-json/wp/v2/posts",
             headers={
                 **_auth_header(),
                 "Content-Type": "application/json",
@@ -148,9 +138,10 @@ async def publish_post(post_id: int) -> dict:
     """
     Updates an existing WordPress post status from 'draft' to 'publish'.
     """
+    base_url = settings.wordpress_base_url.rstrip('/')
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
         resp = await client.post(
-            f"{settings.wordpress_base_url}/wp-json/wp/v2/posts/{post_id}",
+            f"{base_url}/wp-json/wp/v2/posts/{post_id}",
             headers={
                 **_auth_header(),
                 "Content-Type": "application/json",
