@@ -93,8 +93,8 @@ logger = logging.getLogger("seo_service")
 
 
 OPENROUTER_FREE_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-2-9b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
     "deepseek/deepseek-r1:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "mistralai/mistral-7b-instruct:free",
@@ -103,20 +103,18 @@ OPENROUTER_FREE_MODELS = [
 
 
 GEMINI_FLASH_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-002",
-    "gemini-1.5-flash-001",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
     "gemini-1.5-flash-lite",
-    "gemini-flash",
 ]
 
 
 async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
     models_to_try = []
     user_configured = settings.gemini_model.replace("models/", "") if settings.gemini_model else ""
-    if user_configured and "3.5-flash-lite" not in user_configured and "1.5-flash" not in user_configured:
+    if user_configured and "3.5-flash-lite" not in user_configured:
         models_to_try.append(user_configured)
     for m in GEMINI_FLASH_MODELS:
         if m not in models_to_try:
