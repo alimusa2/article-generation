@@ -22,21 +22,51 @@ from app.services import (
     pinterest_service,
 )
 
+import json
+from pathlib import Path
+
 logger = logging.getLogger("pipeline")
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
 _jobs: dict[str, JobResult] = {}
+_running_jobs: set[str] = set()
+JOB_CACHE_FILE = Path("/tmp/article_jobs.json") if Path("/tmp").exists() else Path("article_jobs.json")
+
+
+def _save_jobs_to_disk():
+    try:
+        data = {k: v.model_dump() for k, v in _jobs.items()}
+        JOB_CACHE_FILE.write_text(json.dumps(data, default=str))
+    except Exception as e:
+        logger.warning("Failed to save jobs cache: %s", e)
+
+
+def _load_jobs_from_disk():
+    if not JOB_CACHE_FILE.exists():
+        return
+    try:
+        raw = json.loads(JOB_CACHE_FILE.read_text())
+        for k, v in raw.items():
+            if k not in _jobs:
+                _jobs[k] = JobResult.model_validate(v)
+    except Exception as e:
+        logger.warning("Failed to load jobs cache: %s", e)
 
 
 async def _execute_pipeline(job_id: str, title: str):
     """
     Executes the entire article generation workflow:
     1. Write article (Gemini)
-    2. Generate SEO metadata & Image prompts in parallel (OpenRouter)
+    2. Generate SEO metadata & Image prompts (OpenRouter with Gemini fallback)
     3. Generate 8 section images in parallel (Cloudflare Workers AI)
     4. Cloudinary upload & WP media upload in parallel
     5. Draft post creation on WordPress & Pinterest pinning
     """
+    if job_id in _running_jobs:
+        logger.info("Pipeline already running for job %s; skipping concurrent execution", job_id)
+        return
+
+    _running_jobs.add(job_id)
     job = _jobs[job_id]
     try:
         # Step 1: Article Generation
@@ -47,14 +77,12 @@ async def _execute_pipeline(job_id: str, title: str):
         else:
             article_html = job.article_html
 
-        # Step 2 & 3: Parallelized SEO & Image Prompt Generation
+        # Step 2 & 3: SEO & Image Prompt Generation
         if not job.seo or not job.images:
             job.status = JobStatus.generating_seo
-            (seo_tuple, prompts) = await asyncio.gather(
-                seo_service.generate_seo_metadata(article_html),
-                image_prompt_service.generate_image_prompts(title, article_html)
-            )
+            seo_tuple = await seo_service.generate_seo_metadata(article_html)
             job.seo, raw_seo_text = seo_tuple
+            prompts = await image_prompt_service.generate_image_prompts(title, article_html)
         else:
             raw_seo_text = ""
             prompts = [img.prompt for img in job.images]
@@ -152,6 +180,9 @@ async def _execute_pipeline(job_id: str, title: str):
         job.error = str(e)
         job.error_stage = failed_stage
         logger.exception("Pipeline failed for job %s at stage %s: %s", job_id, failed_stage, e)
+    finally:
+        _running_jobs.discard(job_id)
+        _save_jobs_to_disk()
 
 
 @router.post("/generate", response_model=JobResult)
@@ -167,6 +198,7 @@ async def run_pipeline(
     job_id = str(uuid.uuid4())
     job = JobResult(job_id=job_id, status=JobStatus.pending, title=req.title)
     _jobs[job_id] = job
+    _save_jobs_to_disk()
 
     try:
         await asyncio.wait_for(_execute_pipeline(job_id, req.title), timeout=11.0)
@@ -178,13 +210,14 @@ async def run_pipeline(
 
 @router.get("/jobs/{job_id}", response_model=JobResult)
 async def get_job(job_id: str) -> JobResult:
+    _load_jobs_from_disk()
     job = _jobs.get(job_id)
     if not job:
         if _jobs:
             return list(_jobs.values())[-1]
         return JobResult(job_id=job_id, status=JobStatus.completed, title="Article Generation Job")
 
-    if job.status not in (JobStatus.completed, JobStatus.failed):
+    if job.status not in (JobStatus.completed, JobStatus.failed) and job_id not in _running_jobs:
         try:
             await asyncio.wait_for(_execute_pipeline(job_id, job.title), timeout=8.0)
         except asyncio.TimeoutError:
@@ -195,6 +228,7 @@ async def get_job(job_id: str) -> JobResult:
 
 @router.get("/jobs", response_model=list[JobResult])
 async def list_jobs() -> list[JobResult]:
+    _load_jobs_from_disk()
     return list(_jobs.values())
 
 

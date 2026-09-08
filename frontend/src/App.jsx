@@ -149,7 +149,7 @@ export default function App() {
     } else if (job?.wordpress_post_link) {
       window.open(job.wordpress_post_link, '_blank');
     } else {
-      alert("Post is marked approved. When a generation pipeline completes with valid WordPress credentials, this will publish the post live to furnish-luxe.com.");
+      alert("Post is marked approved. When a generation pipeline completes with valid WordPress credentials, this will publish the post live to WordPress.");
     }
   };
 

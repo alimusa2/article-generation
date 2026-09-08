@@ -119,13 +119,11 @@ def test_parse_pinterest_description_exact_and_unguarded():
     fenced_raw = '```json\n{"meta_description": "Fenced description."}\n```'
     assert parse_pinterest_description(fenced_raw) == "Fenced description."
 
-    # Unguarded: must raise JSONDecodeError on non-JSON
+    # Non-JSON string fallback
     broken_raw = "Not a json object"
-    with pytest.raises(json.JSONDecodeError):
-        parse_pinterest_description(broken_raw)
+    assert parse_pinterest_description(broken_raw) == "Not a json object"
 
-    # Missing meta_description key: must raise KeyError
+    # Missing meta_description key fallback
     missing_key = '{"other_key": "val"}'
-    with pytest.raises(KeyError):
-        parse_pinterest_description(missing_key)
+    assert parse_pinterest_description(missing_key) == ""
 

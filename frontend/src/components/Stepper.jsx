@@ -4,8 +4,7 @@ import { STAGES } from '../constants/pipeline';
 export default function Stepper({ job }) {
   const getStageState = (stageId, index) => {
     if (!job) {
-      if (index === 0) return 'completed';
-      if (index === 1) return 'active';
+      if (index === 0) return 'active';
       return 'pending';
     }
 

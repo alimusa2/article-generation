@@ -86,24 +86,72 @@ Before returning, ensure:
 * secondary_keywords contains 3-5 items"""
 
 
-# In n8n JSON, 'retryOnFail' is false on the 'generate seo meta data' node.
-# Preserving asymmetry: no retry decorator applied here.
-async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
+import logging
+import asyncio
+
+logger = logging.getLogger("seo_service")
+
+
+async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/{settings.gemini_model}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+    }
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
-            json={
-                "model": settings.openrouter_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            },
-        )
+        resp = await client.post(url, params={"key": settings.gemini_api_key}, json=payload)
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
+    """
+    Calls OpenRouter with backoff on HTTP 429 Too Many Requests.
+    Falls back to Gemini API if OpenRouter fails or continues to rate limit.
+    """
+    if settings.openrouter_api_key:
+        max_retries = 3
+        backoff_delays = [2.0, 4.0, 6.0]
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                    resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+                        json={
+                            "model": settings.openrouter_model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                        },
+                    )
+                    if resp.status_code == 429:
+                        logger.warning("OpenRouter returned 429 (attempt %d/%d). Retrying...", attempt + 1, max_retries)
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(backoff_delays[attempt])
+                            continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"]
+            except Exception as err:
+                logger.warning("OpenRouter call error (attempt %d/%d): %s", attempt + 1, max_retries, err)
+                if attempt < max_retries - 1 and isinstance(err, httpx.HTTPStatusError) and err.response.status_code == 429:
+                    await asyncio.sleep(backoff_delays[attempt])
+                    continue
+                break
+
+    if settings.gemini_api_key:
+        logger.info("Using Gemini fallback for LLM request")
+        return await _call_gemini_fallback(system_prompt, user_prompt)
+
+    raise RuntimeError("Both OpenRouter and Gemini API calls failed or missing API keys.")
 
 
 async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:

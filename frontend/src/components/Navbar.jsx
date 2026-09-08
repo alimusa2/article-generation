@@ -7,9 +7,7 @@ export default function Navbar({ onOpenNewDraft, loading }) {
       <div className="top-navbar-inner">
         <div className="navbar-brand-left">
           <img src={siddiquiWings} alt="Wings Emblem" className="brand-wings-img" />
-          <span className="brand-title">Furnish Luxe</span>
-          <span className="brand-divider">|</span>
-          <span className="brand-subtitle">Editorial Article & Asset Review Desk</span>
+          <span className="brand-title">Editorial Article & Asset Review Desk</span>
         </div>
 
         <div className="navbar-brand-right">
