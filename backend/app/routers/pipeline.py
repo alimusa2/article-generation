@@ -255,7 +255,7 @@ async def run_pipeline(
     _jobs[job_id] = job
     _save_jobs_to_disk()
 
-    await _advance_job(job)
+    await _execute_pipeline(job)
     return _jobs[job_id]
 
 
@@ -271,7 +271,7 @@ async def get_job(job_id: str) -> JobResult:
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
-        await _advance_job(job)
+        await _execute_pipeline(job)
 
     return job
 
