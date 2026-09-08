@@ -41,7 +41,7 @@ The following anomalies, inconsistencies, and potential bugs in the original n8n
 User submits Title
    │
    ▼
-1. Gemini (models/gemini-3.5-flash-lite)
+1. Gemini (gemini-3.5-flash)
    └── Generates complete HTML article with 8 H2s and 8 [image space] placeholders
    │   [retryOnFail: true, 3 attempts]
    ▼

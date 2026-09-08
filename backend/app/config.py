@@ -10,10 +10,10 @@ class Settings(BaseSettings):
 
     # --- LLMs ---
     gemini_api_key: str = ""
-    gemini_model: str = "models/gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
 
     openrouter_api_key: str = ""
-    openrouter_model: str = "google/gemma-2-9b-it:free"
+    openrouter_model: str = "openrouter/free"
 
     # --- Cloudflare Workers AI (image generation) ---
     cloudflare_account_id: str = ""

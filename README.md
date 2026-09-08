@@ -80,7 +80,7 @@ npm run dev:frontend
 ---
 
 ## Automated Pipeline Stages
-1. **Writing Article**: Google Gemini (`models/gemini-3.5-flash-lite`) generates deep, long-form editorial content with `[IMAGE_1]` to `[IMAGE_8]` placeholders.
+1. **Writing Article**: Google Gemini (`gemini-3.5-flash`) generates deep, long-form editorial content with `[IMAGE_1]` to `[IMAGE_8]` placeholders.
 2. **SEO Metadata**: OpenRouter LLM (`openrouter/free`) generates focus keyphrase, SEO title, meta description, and URL slug.
 3. **Image Prompts**: OpenRouter LLM creates 8 unique, photorealistic interior photography prompts.
 4. **Generating Images**: Cloudflare Workers AI (`@cf/black-forest-labs/flux-1-schnell`) generates 8 images sequentially with exact 2000ms intervals.

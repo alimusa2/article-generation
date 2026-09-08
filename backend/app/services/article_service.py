@@ -56,25 +56,12 @@ import logging
 
 logger = logging.getLogger("article_service")
 
-GEMINI_FLASH_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash-lite",
-]
-
 
 @external_call_retry
 async def generate_article(title: str) -> str:
-    """Calls active Gemini Flash models and returns raw HTML article."""
-    models_to_try = []
-    user_configured = settings.gemini_model.replace("models/", "") if settings.gemini_model else ""
-    if user_configured and "3.5-flash-lite" not in user_configured:
-        models_to_try.append(user_configured)
-    for m in GEMINI_FLASH_MODELS:
-        if m not in models_to_try:
-            models_to_try.append(m)
+    """Calls Gemini API with canonical model (gemini-3.5-flash) and returns raw HTML article."""
+    model_name = settings.gemini_model.replace("models/", "") if settings.gemini_model else "gemini-3.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
 
     system_prompt = ARTICLE_SYSTEM_PROMPT
     user_prompt = (
@@ -85,35 +72,23 @@ async def generate_article(title: str) -> str:
         f"Return only the final HTML article."
     )
 
-    last_err = None
-    for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        payload = {
-            "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_prompt}],
-                }
-            ],
-        }
-        try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, params={"key": settings.gemini_api_key}, json=payload)
-                if resp.status_code == 404:
-                    logger.warning("Gemini model '%s' returned 404. Trying next active Gemini Flash model...", model)
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["candidates"][0]["content"]["parts"][0]["text"]
-                if content:
-                    logger.info("Successfully generated article with Gemini model '%s'", model)
-                    return content
-        except Exception as e:
-            logger.warning("Gemini model '%s' call failed: %s. Trying next...", model, e)
-            last_err = e
-            continue
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+    }
 
-    if last_err:
-        raise last_err
-    raise RuntimeError("All Gemini API models failed.")
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        resp = await client.post(url, params={"key": settings.gemini_api_key}, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["candidates"][0]["content"]["parts"][0]["text"]
+        if content:
+            logger.info("Successfully generated article with Gemini model '%s'", model_name)
+            return content
+
+    raise RuntimeError(f"Gemini API call to '{model_name}' returned empty response.")
