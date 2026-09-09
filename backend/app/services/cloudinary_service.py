@@ -83,7 +83,7 @@ except Exception as e:
 
 
 def convert_bytes_to_avif_data_url(image_bytes: bytes, title: str = "", fallback_index: int = 1) -> str:
-    """Converts raw image bytes to AVIF or WebP format using Pillow with topic-relevant fallback."""
+    """Converts raw image bytes to 1000x700 JPEG format using Pillow with topic-relevant fallback."""
     fallback_url = get_relevant_fallback_url(title, fallback_index)
     try:
         img = Image.open(io.BytesIO(image_bytes))
@@ -94,36 +94,37 @@ def convert_bytes_to_avif_data_url(image_bytes: bytes, title: str = "", fallback
 
         if img.mode not in ("RGB", "RGBA"):
             img = img.convert("RGB")
+        
+        # Enforce exact 1000x700 resolution
+        img = img.resize((1000, 700), Image.Resampling.LANCZOS)
+
         out = io.BytesIO()
-        mime = "image/avif"
-        try:
-            img.save(out, format="AVIF", quality=80)
-        except Exception:
-            img.save(out, format="WEBP", quality=85)
-            mime = "image/webp"
-        avif_bytes = out.getvalue()
-        b64 = base64.b64encode(avif_bytes).decode("utf-8")
-        return f"data:{mime};base64,{b64}"
+        img.save(out, format="JPEG", quality=85)
+        jpeg_bytes = out.getvalue()
+        b64 = base64.b64encode(jpeg_bytes).decode("utf-8")
+        return f"data:image/jpeg;base64,{b64}"
     except Exception as e:
         logger.warning("Local PIL image conversion failed: %s. Using topic fallback URL.", e)
         return fallback_url
 
 
-def _compute_public_id(title: str, index: int) -> str:
-    slug = re.sub(r"[^a-z0-9]", "-", title.lower())
+def _compute_public_id(title: str, index: int, h2_title: str = "") -> str:
+    target = h2_title.strip() if h2_title else title.strip()
+    slug = re.sub(r"[^a-z0-9]", "-", target.lower())
+    slug = re.sub(r"-+", "-", slug).strip("-")[:60]
     return f"{slug}-{index}"
 
 
-async def upload_image(image_bytes: bytes, title: str, index: int) -> dict[str, str]:
+async def upload_image(image_bytes: bytes, title: str, index: int, h2_title: str = "") -> dict[str, str]:
     """
-    Converts image to AVIF locally and optionally uploads to Cloudinary if configured.
+    Resizes image to 1000x700 locally and optionally uploads to Cloudinary if configured.
     Returns a dict containing 'secure_url', 'avif_url', and 'url'.
     Guaranteed to never throw an uncaught exception.
     """
-    fallback_url = get_relevant_fallback_url(title, index)
+    fallback_url = get_relevant_fallback_url(h2_title or title, index)
 
     try:
-        avif_data_url = convert_bytes_to_avif_data_url(image_bytes, title=title, fallback_index=index)
+        avif_data_url = convert_bytes_to_avif_data_url(image_bytes, title=h2_title or title, fallback_index=index)
 
         if (
             settings.cloudinary_cloud_name
@@ -132,9 +133,9 @@ async def upload_image(image_bytes: bytes, title: str, index: int) -> dict[str, 
         ):
             try:
                 url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload"
-                files = {"file": (f"blog-image-{index}.png", image_bytes, "image/png")}
+                files = {"file": (f"{_compute_public_id(title, index, h2_title)}.jpg", image_bytes, "image/jpeg")}
                 data = {
-                    "public_id": _compute_public_id(title, index),
+                    "public_id": _compute_public_id(title, index, h2_title),
                     "upload_preset": settings.cloudinary_upload_preset,
                 }
                 async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
@@ -144,12 +145,9 @@ async def upload_image(image_bytes: bytes, title: str, index: int) -> dict[str, 
                     secure_url = res_json.get("secure_url", "")
                     raw_url = res_json.get("url", secure_url)
 
-                clean_url = re.sub(r"\.(jpg|jpeg|png)$", ".avif", secure_url, flags=re.IGNORECASE)
-                avif_url = clean_url.replace("/upload/", "/upload/f_avif/")
-
                 return {
                     "secure_url": secure_url,
-                    "avif_url": avif_url,
+                    "avif_url": secure_url,
                     "url": raw_url,
                 }
             except Exception as e:

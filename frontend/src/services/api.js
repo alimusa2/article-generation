@@ -80,3 +80,12 @@ export async function checkBackendHealth() {
   return res.json();
 }
 
+export async function getPinterestBoards() {
+  const res = await fetch('/pipeline/pinterest/boards');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to fetch Pinterest boards');
+  }
+  return res.json();
+}
+

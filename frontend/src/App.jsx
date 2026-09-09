@@ -257,6 +257,7 @@ export default function App() {
             wordpressPostLink={job?.wordpress_post_link}
             isPublished={isPublished}
             wordpressPostId={job?.wordpress_post_id}
+            pinterestPins={job?.pinterest_pins}
           />
 
           <ContentDetailsCard

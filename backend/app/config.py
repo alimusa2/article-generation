@@ -35,9 +35,8 @@ class Settings(BaseSettings):
     wordpress_app_password: str = "SSqy ZKaM 1wbd lwVZ PZ6r BYQI"
 
     # --- Pinterest ---
-    pinterest_access_token: str | None = None
-    # Flagged: board_id hardcoded in n8n as '1086423178800607052', loaded from env with fallback
-    pinterest_board_id: str = "1086423178800607052"
+    pinterest_access_token: str = os.getenv("PINTEREST_ACCESS_TOKEN", "")
+    pinterest_board_id: str = os.getenv("PINTEREST_BOARD_ID", "1086423178800607052")
 
     # --- App behavior ---
     images_per_article: int = 8

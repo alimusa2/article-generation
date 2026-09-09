@@ -20,9 +20,9 @@ def _auth_header() -> dict:
 #   Content-Disposition: attachment; filename=image.avif
 #   Content-Type: image/avif
 # retryOnFail: false (no retry decorator applied)
-async def upload_media_from_url(avif_url: str) -> dict:
+async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
     """
-    Downloads or decodes the AVIF image and re-uploads it to WP media.
+    Downloads or decodes the JPEG image and re-uploads it to WP media.
     Returns the media item dict including 'id' and 'url'.
     """
     if avif_url.startswith("data:"):
@@ -34,14 +34,21 @@ async def upload_media_from_url(avif_url: str) -> dict:
             img_resp.raise_for_status()
             img_content = img_resp.content
 
+    slug = "image"
+    if h2_title:
+        s = h2_title.lower().strip()
+        s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
+        slug = s[:60] or "image"
+    filename = f"{slug}.jpg"
+
     base_url = settings.wordpress_base_url.rstrip('/')
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
         upload_resp = await client.post(
             f"{base_url}/wp-json/wp/v2/media",
             headers={
                 **_auth_header(),
-                "Content-Disposition": "attachment; filename=image.avif",
-                "Content-Type": "image/avif",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Type": "image/jpeg",
             },
             content=img_content,
         )

@@ -67,6 +67,18 @@ def _load_jobs_from_disk():
         logger.warning("Failed to load jobs cache: %s", e)
 
 
+def _extract_h2_titles(html: str) -> list[str]:
+    if not html:
+        return []
+    matches = re.findall(r"<h2[^>]*>(.*?)</h2>", html, flags=re.IGNORECASE | re.DOTALL)
+    titles = []
+    for m in matches:
+        clean = re.sub(r"<[^>]+>", "", m).strip()
+        if clean:
+            titles.append(clean)
+    return titles
+
+
 async def _advance_job(job: JobResult):
     """
     Advances a job by executing the NEXT single pending stage.
@@ -128,8 +140,10 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 4: Generate Images & Cloudinary / AVIF Upload (Parallelized)
+            # STAGE 4: Generate Images & Cloudinary Upload (Parallelized)
             # -------------------------------------------------------------
+            section_titles = _extract_h2_titles(job.article_html)
+
             if any(not img.cloudinary_url for img in job.images):
                 job.status = JobStatus.generating_images
                 _save_jobs_to_disk()
@@ -140,11 +154,12 @@ async def _advance_job(job: JobResult):
 
                 job.status = JobStatus.uploading_images
                 _save_jobs_to_disk()
-                logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
+                logger.info("[AVIF] Started Stage 5 (Cloudinary & JPEG conversion) for job %s", job.job_id)
 
                 async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
+                    h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
                     try:
-                        c_res = await cloudinary_service.upload_image(img_bytes, job.title, idx)
+                        c_res = await cloudinary_service.upload_image(img_bytes, job.title, idx, h2_title=h2_title)
                         img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
                         img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
                     except Exception as c_err:
@@ -172,9 +187,10 @@ async def _advance_job(job: JobResult):
 
                 async def _wp_upload_one(img: GeneratedImage):
                     if not img.wordpress_media_url:
+                        h2_title = section_titles[img.image_index - 1] if img.image_index - 1 < len(section_titles) else job.title
                         if settings.wordpress_username and settings.wordpress_app_password:
                             try:
-                                wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url)
+                                wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url, h2_title=h2_title)
                                 img.wordpress_media_id = wp_media.get("id", 0)
                                 raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
                                 img.wordpress_media_url = _enforce_https(raw_wp_url)
@@ -230,7 +246,7 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 8: Generate EXACTLY 8 Pinterest Pins
+            # STAGE 8: Generate EXACTLY 8 Pinterest Pins with Section Titles & WP Link
             # -------------------------------------------------------------
             if not job.pinterest_pins:
                 job.status = JobStatus.publishing_pinterest
@@ -246,6 +262,7 @@ async def _advance_job(job: JobResult):
                     wp_link=wp_link,
                     raw_seo_text=raw_seo_dict,
                     cloudinary_image_urls=cloudinary_urls,
+                    section_titles=section_titles,
                 )
                 job.pinterest_pins = pin_results
                 if pin_results and isinstance(pin_results[0], dict) and "id" in pin_results[0]:
@@ -382,3 +399,12 @@ async def submit_job_feedback(job_id: str, feedback_req: JobFeedbackRequest):
     job.feedback.append(entry)
     _save_jobs_to_disk()
     return {"status": "recorded", "feedback_count": len(job.feedback), "entry": entry}
+
+
+@router.get("/pinterest/boards")
+async def get_pinterest_boards():
+    """
+    Fetches available Pinterest boards for selection.
+    """
+    boards = await pinterest_service.get_user_boards()
+    return {"boards": boards}

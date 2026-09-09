@@ -27,18 +27,51 @@ def parse_pinterest_description(raw_seo_text: str | dict) -> str:
     return str(raw_seo_text)
 
 
+async def get_user_boards(access_token: str | None = None) -> list[dict]:
+    """
+    Fetches Pinterest boards for the authenticated user using Pinterest API v5.
+    Returns list of dicts: [{"id": "...", "name": "..."}].
+    """
+    token = access_token or settings.pinterest_access_token
+    if not token:
+        return []
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    endpoints = [
+        "https://api.pinterest.com/v5/boards",
+        "https://api-sandbox.pinterest.com/v5/boards",
+    ]
+    if token.startswith("pina_"):
+        endpoints.reverse()
+
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        for url in endpoints:
+            try:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    items = data.get("items", [])
+                    return [{"id": item.get("id"), "name": item.get("name", "Untitled Board")} for item in items if item.get("id")]
+            except Exception:
+                continue
+    return []
+
+
 async def create_pin(
     board_id: str,
     title: str,
     wp_link: str,
     description: str,
     image_url: str,
+    access_token: str | None = None,
 ) -> dict:
     """
     Creates a single Pinterest pin via Pinterest API v5.
-    Uses production API endpoint https://api.pinterest.com/v5/pins.
     """
-    url = "https://api.pinterest.com/v5/pins"
+    token = access_token or settings.pinterest_access_token
     payload = {
         "board_id": board_id,
         "title": title.strip(),
@@ -50,13 +83,30 @@ async def create_pin(
         },
     }
     headers = {
-        "Authorization": f"Bearer {settings.pinterest_access_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+    endpoints = [
+        "https://api.pinterest.com/v5/pins",
+        "https://api-sandbox.pinterest.com/v5/pins",
+    ]
+    if token and token.startswith("pina_"):
+        endpoints.reverse()
+
+    last_error = None
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        for url in endpoints:
+            try:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code in (200, 201):
+                    res = resp.json()
+                    res["link"] = wp_link
+                    return res
+                last_error = f"HTTP {resp.status_code}: {resp.text}"
+            except Exception as e:
+                last_error = str(e)
+    
+    raise Exception(f"Pinterest API Error: {last_error}")
 
 
 async def create_pins_for_images(
@@ -64,25 +114,33 @@ async def create_pins_for_images(
     wp_link: str,
     raw_seo_text: str | dict,
     cloudinary_image_urls: list[str],
+    section_titles: list[str] | None = None,
+    board_id: str | None = None,
 ) -> list[dict]:
     """
     Pins each image to Pinterest (or generates 8 pin objects with live WP link).
     """
     description = parse_pinterest_description(raw_seo_text)
-    board_id = settings.pinterest_board_id or "1086423178800607052"
+    target_board_id = board_id or settings.pinterest_board_id or "1086423178800607052"
 
     results: list[dict] = []
-    # Guarantee 8 image URLs
     urls = cloudinary_image_urls if cloudinary_image_urls else [
         f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800" for _ in range(8)
     ]
 
-    for idx, img_url in enumerate(urls, start=1):
+    for idx in range(1, 9):
+        img_url = urls[idx - 1] if idx - 1 < len(urls) else urls[0]
+        pin_title = (
+            section_titles[idx - 1]
+            if (section_titles and idx - 1 < len(section_titles) and section_titles[idx - 1].strip())
+            else f"{title} - Pin {idx}"
+        )
+
         if settings.pinterest_access_token:
             try:
                 res = await create_pin(
-                    board_id=board_id,
-                    title=f"{title} - Pin {idx}",
+                    board_id=target_board_id,
+                    title=pin_title,
                     wp_link=wp_link,
                     description=description,
                     image_url=img_url,
@@ -93,7 +151,7 @@ async def create_pins_for_images(
             except Exception as e:
                 results.append({
                     "id": f"pin-{idx}",
-                    "title": f"{title} - Pin {idx}",
+                    "title": pin_title,
                     "description": description,
                     "image_url": img_url,
                     "link": wp_link,
@@ -102,7 +160,7 @@ async def create_pins_for_images(
         else:
             results.append({
                 "id": f"pin-{idx}",
-                "title": f"{title} - Pin {idx}",
+                "title": pin_title,
                 "description": description,
                 "image_url": img_url,
                 "link": wp_link,
