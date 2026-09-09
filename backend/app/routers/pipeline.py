@@ -120,7 +120,7 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 4: Generate Images & Cloudinary / AVIF Upload
+            # STAGE 4: Generate Images & Cloudinary / AVIF Upload (Parallelized)
             # -------------------------------------------------------------
             if any(not img.cloudinary_url for img in job.images):
                 job.status = JobStatus.generating_images
@@ -134,29 +134,35 @@ async def _advance_job(job: JobResult):
                 _save_jobs_to_disk()
                 logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
 
-                for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1):
+                async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
                     try:
                         c_res = await cloudinary_service.upload_image(img_bytes, job.title, idx)
                         img.cloudinary_url = c_res.get("secure_url") or c_res.get("url", "")
                         img.avif_url = c_res.get("avif_url") or img.cloudinary_url
                     except Exception as c_err:
                         logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        img.cloudinary_url = "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800"
+                        img.cloudinary_url = f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800"
                         img.avif_url = img.cloudinary_url
+
+                upload_tasks = [
+                    _upload_one(idx, img, img_bytes)
+                    for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
+                ]
+                await asyncio.gather(*upload_tasks)
 
                 _save_jobs_to_disk()
                 logger.info("[AVIF] Completed Stage 5 for job %s", job.job_id)
                 return
 
             # -------------------------------------------------------------
-            # STAGE 5 & 6: Upload WordPress Media & Inject Real Media URLs
+            # STAGE 5 & 6: Upload WordPress Media & Inject Real Media URLs (Parallelized)
             # -------------------------------------------------------------
             if any(not img.wordpress_media_url for img in job.images) or not job.formatted_content:
                 job.status = JobStatus.uploading_images
                 _save_jobs_to_disk()
                 logger.info("[WP_MEDIA] Started Stage 6 (WordPress Media Upload) for job %s", job.job_id)
 
-                for img in job.images:
+                async def _wp_upload_one(img: GeneratedImage):
                     if not img.wordpress_media_url:
                         if settings.wordpress_username and settings.wordpress_app_password:
                             try:
@@ -169,6 +175,9 @@ async def _advance_job(job: JobResult):
                                 img.wordpress_media_url = img.avif_url or img.cloudinary_url
                         else:
                             img.wordpress_media_url = img.avif_url or img.cloudinary_url
+
+                wp_tasks = [_wp_upload_one(img) for img in job.images]
+                await asyncio.gather(*wp_tasks)
 
                 # Replace placeholders in article HTML with real WordPress media URLs
                 media_urls = [img.wordpress_media_url for img in job.images]
