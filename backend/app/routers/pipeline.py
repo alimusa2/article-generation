@@ -149,7 +149,7 @@ async def _advance_job(job: JobResult):
                         img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
                     except Exception as c_err:
                         logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        img.cloudinary_url = f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800"
+                        img.cloudinary_url = cloudinary_service.get_relevant_fallback_url(job.title, idx)
                         img.avif_url = img.cloudinary_url
 
                 upload_tasks = [

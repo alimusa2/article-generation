@@ -81,9 +81,10 @@ def _generate_fallback_image_prompts(title: str, article_html: str) -> list[str]
     for idx in range(settings.images_per_article):
         if idx < len(sections):
             sec_title = sections[idx].split("\n")[0].replace(f"Section {idx+1} H2: ", "").strip()
-            prompts.append(f"{sec_title}, {base_style}, featuring elegant hearth details and warm ambient decor.")
+            clean_sec = re.sub(r"^\d+[\.\s\-]+", "", sec_title).strip()
+            prompts.append(f"{clean_sec}, {base_style}, featuring elegant interior composition and warm ambient decor.")
         else:
-            prompts.append(f"{title} - Scene {idx+1}, {base_style}, showcasing luxury rustic home interior aesthetic.")
+            prompts.append(f"{title} - Scene {idx+1}, {base_style}, showcasing luxury modern home interior aesthetic.")
     return prompts
 
 
