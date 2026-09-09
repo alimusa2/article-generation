@@ -6,16 +6,27 @@ export default function PublishingStatusCard({ wordpressPostLink, isPublished, w
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [boardInput, setBoardInput] = useState('');
   const [extractedBoardId, setExtractedBoardId] = useState('');
+  const [isFetchingBoards, setIsFetchingBoards] = useState(false);
+  const [boardsError, setBoardsError] = useState(null);
 
-  useEffect(() => {
-    getPinterestBoards()
-      .then((data) => {
-        if (data && data.boards) {
-          setBoards(data.boards);
-        }
-      })
-      .catch((err) => console.warn('Could not fetch Pinterest boards:', err));
-  }, []);
+  const handleFetchBoards = async () => {
+    setIsFetchingBoards(true);
+    setBoardsError(null);
+    try {
+      const data = await getPinterestBoards();
+      if (data && data.boards && data.boards.length > 0) {
+        setBoards(data.boards);
+      } else if (data && data.error) {
+        setBoardsError(data.error);
+      } else {
+        setBoardsError("No boards found for account or token expired");
+      }
+    } catch (err) {
+      setBoardsError(err.message || "Failed to fetch boards");
+    } finally {
+      setIsFetchingBoards(false);
+    }
+  };
 
   const handleBoardInputChange = (val) => {
     setBoardInput(val);
@@ -79,9 +90,28 @@ export default function PublishingStatusCard({ wordpressPostLink, isPublished, w
 
       {/* Pinterest Board Selector */}
       <div className="pinterest-board-section" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '12px', marginTop: '12px' }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
-          📌 Pinterest Board Selector
-        </label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <label style={{ fontSize: '0.78rem', fontWeight: '600', color: '#374151' }}>
+            📌 Pinterest Board Selector
+          </label>
+          <button
+            type="button"
+            onClick={handleFetchBoards}
+            disabled={isFetchingBoards}
+            style={{
+              padding: '2px 8px',
+              fontSize: '0.72rem',
+              fontWeight: '600',
+              color: '#1e392a',
+              backgroundColor: '#f3f4f6',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              cursor: isFetchingBoards ? 'wait' : 'pointer',
+            }}
+          >
+            {isFetchingBoards ? "Fetching..." : "Fetch Boards 🔄"}
+          </button>
+        </div>
         
         {boards.length > 0 && (
           <select
@@ -123,6 +153,12 @@ export default function PublishingStatusCard({ wordpressPostLink, isPublished, w
         {extractedBoardId && (
           <div style={{ fontSize: '0.72rem', color: '#059669', marginTop: '4px', fontWeight: '500' }}>
             ✓ Board ID extracted: <code>{extractedBoardId}</code>
+          </div>
+        )}
+
+        {boardsError && (
+          <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: '4px' }}>
+            ⚠ {boardsError}
           </div>
         )}
       </div>

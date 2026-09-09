@@ -2,6 +2,7 @@
 Central configuration. All secrets come from environment variables (.env),
 never hardcoded — this replaces the plaintext tokens that were in the n8n export.
 """
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

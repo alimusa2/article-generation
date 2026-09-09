@@ -1,6 +1,9 @@
 import asyncio
 import uuid
 import logging
+import re
+import json
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 
 from app.config import settings
@@ -405,6 +408,11 @@ async def submit_job_feedback(job_id: str, feedback_req: JobFeedbackRequest):
 async def get_pinterest_boards():
     """
     Fetches available Pinterest boards for selection.
+    Guaranteed to return 200 OK even if token is missing or external call fails.
     """
-    boards = await pinterest_service.get_user_boards()
-    return {"boards": boards}
+    try:
+        boards = await pinterest_service.get_user_boards()
+        return {"boards": boards}
+    except Exception as e:
+        logger.exception("Failed to fetch Pinterest boards: %s", e)
+        return {"boards": [], "error": str(e)}
