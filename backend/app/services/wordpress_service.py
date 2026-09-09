@@ -39,7 +39,7 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
         s = h2_title.lower().strip()
         s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
         slug = s[:60] or "image"
-    filename = f"{slug}.jpg"
+    filename = f"{slug}.avif"
 
     base_url = settings.wordpress_base_url.rstrip('/')
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
@@ -48,7 +48,7 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
             headers={
                 **_auth_header(),
                 "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Type": "image/jpeg",
+                "Content-Type": "image/avif",
             },
             content=img_content,
         )
