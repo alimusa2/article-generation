@@ -133,12 +133,20 @@ async def generate_article(title: str) -> str:
 
     try:
         content = await _call_openrouter(system_prompt, user_prompt)
-        if content and "<h2" in content and "[image space]" in content:
-            logger.info("Successfully generated article via LLM for title '%s'", title)
-            return content
-        elif content:
-            logger.warning("LLM response did not meet section formatting rules. Using structured fallback.")
-            return content
+        if content:
+            # Clean markdown code fences and extraneous pre-HTML text
+            cleaned = re.sub(r"^```(?:html)?\s*", "", content.strip(), flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+            html_match = re.search(r"<(?:h1|h2)[\s\S]*", cleaned, re.IGNORECASE)
+            if html_match:
+                cleaned = html_match.group(0).strip()
+
+            if "<h2" in cleaned and "[image space]" in cleaned:
+                logger.info("Successfully generated article via LLM for title '%s'", title)
+                return cleaned
+            else:
+                logger.warning("LLM response did not meet section formatting rules. Using structured fallback.")
+                return _generate_fallback_article(title)
     except Exception as err:
         logger.warning("LLM call failed for generate_article: %s. Using structured fallback article.", err)
 
