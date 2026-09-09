@@ -24,7 +24,7 @@ async def _generate_one_image(client: httpx.AsyncClient, prompt: str) -> bytes:
             "Content-Type": "application/json",
         },
         json={"prompt": prompt},
-        timeout=2.0,
+        timeout=settings.request_timeout_seconds,
     )
     resp.raise_for_status()
     data = resp.json()
