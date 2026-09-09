@@ -29,13 +29,13 @@ async def upload_media_from_url(avif_url: str) -> dict:
         _, encoded = avif_url.split(",", 1)
         img_content = base64.b64decode(encoded)
     else:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=3.0) as client:
             img_resp = await client.get(avif_url)
             img_resp.raise_for_status()
             img_content = img_resp.content
 
     base_url = settings.wordpress_base_url.rstrip('/')
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+    async with httpx.AsyncClient(timeout=3.0) as client:
         upload_resp = await client.post(
             f"{base_url}/wp-json/wp/v2/media",
             headers={
