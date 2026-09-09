@@ -27,9 +27,15 @@ except Exception as e:
 
 
 def convert_bytes_to_avif_data_url(image_bytes: bytes, fallback_index: int = 1) -> str:
-    """Converts raw image bytes to AVIF or WebP format using Pillow with safe fallback."""
+    """Converts raw image bytes to AVIF or WebP format using Pillow with safe fallback for dummy 1x1 pixels."""
+    fallback_url = FALLBACK_DECOR_URLS[(fallback_index - 1) % len(FALLBACK_DECOR_URLS)]
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        # Reject 1x1 dummy/fallback green pixels and return curated high-res photography
+        if img.size[0] <= 10 or img.size[1] <= 10:
+            logger.info("Detected 1x1 dummy pixel for image %d. Returning curated photography.", fallback_index)
+            return fallback_url
+
         if img.mode not in ("RGB", "RGBA"):
             img = img.convert("RGB")
         out = io.BytesIO()
@@ -44,8 +50,7 @@ def convert_bytes_to_avif_data_url(image_bytes: bytes, fallback_index: int = 1) 
         return f"data:{mime};base64,{b64}"
     except Exception as e:
         logger.warning("Local PIL image conversion failed: %s. Using curated fallback URL.", e)
-        fallback_idx = (fallback_index - 1) % len(FALLBACK_DECOR_URLS)
-        return FALLBACK_DECOR_URLS[fallback_idx]
+        return fallback_url
 
 
 def _compute_public_id(title: str, index: int) -> str:
@@ -92,7 +97,7 @@ async def upload_image(image_bytes: bytes, title: str, index: int) -> dict[str, 
                     "url": raw_url,
                 }
             except Exception as e:
-                logger.warning("Cloudinary upload failed or not configured, using local AVIF conversion: %s", e)
+                logger.warning("Cloudinary upload failed or not configured, using local conversion: %s", e)
 
         return {
             "secure_url": avif_data_url,
