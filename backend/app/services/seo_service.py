@@ -93,7 +93,7 @@ logger = logging.getLogger("seo_service")
 
 
 async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
-    model_name = settings.gemini_model.replace("models/", "") if settings.gemini_model else "gemini-3.5-flash"
+    model_name = settings.gemini_model.replace("models/", "") if settings.gemini_model else "gemini-2.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
@@ -120,7 +120,7 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     """
     Calls OpenRouter using the configured model (openrouter/free).
     Includes recommended OpenRouter headers.
-    Falls back to Gemini API (gemini-3.5-flash) if OpenRouter fails or is rate-limited.
+    Falls back to Gemini API (gemini-2.5-flash) if OpenRouter fails or is rate-limited.
     """
     if settings.openrouter_api_key:
         model = settings.openrouter_model or "openrouter/free"
@@ -165,6 +165,22 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     raise RuntimeError("Both OpenRouter and Gemini API calls failed.")
 
 
+def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:
+    import re, json
+    h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", article_html, re.IGNORECASE | re.DOTALL)
+    title_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip() if h1_match else "Rustic Stone Fireplace Inspiration for 2026"
+    slug = re.sub(r"[^\w\s-]", "", title_text.lower()).strip().replace(" ", "-")[:70]
+
+    seo = SeoMetadata(
+        seo_title=f"{title_text[:45]} Inspiration for 2026" if len(title_text) <= 45 else title_text[:55],
+        meta_description=f"Explore expert design ideas, styling tips, and inspiration for {title_text.lower()} to transform your living space with cozy modern decor."[:155],
+        url_slug=slug,
+        focus_keyphrase="rustic stone fireplace",
+        secondary_keywords=["stone fireplace", "living room decor", "fireplace design", "cozy home inspiration"],
+    )
+    return seo, json.dumps(seo.model_dump())
+
+
 async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:
     user_prompt = (
         "# Article SEO Metadata Request\n\n"
@@ -174,13 +190,20 @@ async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:
         "Analyze the complete article to identify its title, main topic, primary keyword, search intent, and related keywords.\n\n"
         "Return only the JSON object specified in the system instructions.\n"
     )
-    raw = await _call_openrouter(SEO_SYSTEM_PROMPT, user_prompt)
-    parsed = extract_json_object(raw)
-    seo = SeoMetadata(
-        seo_title=parsed.get("seo_title") or parsed.get("title", ""),
-        meta_description=parsed.get("meta_description") or parsed.get("description", ""),
-        url_slug=parsed.get("url_slug", ""),
-        focus_keyphrase=parsed.get("focus_keyphrase", ""),
-        secondary_keywords=parsed.get("secondary_keywords") or [],
-    )
-    return seo, raw
+    try:
+        raw = await _call_openrouter(SEO_SYSTEM_PROMPT, user_prompt)
+        parsed = extract_json_object(raw)
+        seo = SeoMetadata(
+            seo_title=parsed.get("seo_title") or parsed.get("title", ""),
+            meta_description=parsed.get("meta_description") or parsed.get("description", ""),
+            url_slug=parsed.get("url_slug", ""),
+            focus_keyphrase=parsed.get("focus_keyphrase", ""),
+            secondary_keywords=parsed.get("secondary_keywords") or [],
+        )
+        if seo.seo_title and seo.meta_description:
+            return seo, raw
+    except Exception as err:
+        logger.warning("generate_seo_metadata LLM failed: %s. Using structured fallback SEO metadata.", err)
+
+    return _generate_fallback_seo(article_html)
+

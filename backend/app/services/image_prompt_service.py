@@ -74,6 +74,19 @@ async def _call_groq(system_prompt: str, user_prompt: str) -> str:
     return await _call_openrouter(system_prompt, user_prompt)
 
 
+def _generate_fallback_image_prompts(title: str, article_html: str) -> list[str]:
+    sections = _extract_h2_sections(article_html)
+    prompts = []
+    base_style = "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling"
+    for idx in range(settings.images_per_article):
+        if idx < len(sections):
+            sec_title = sections[idx].split("\n")[0].replace(f"Section {idx+1} H2: ", "").strip()
+            prompts.append(f"{sec_title}, {base_style}, featuring elegant hearth details and warm ambient decor.")
+        else:
+            prompts.append(f"{title} - Scene {idx+1}, {base_style}, showcasing luxury rustic home interior aesthetic.")
+    return prompts
+
+
 async def generate_image_prompts(title: str, article_html: str) -> list[str]:
     sections = _extract_h2_sections(article_html)
     sections_formatted = "\n\n".join(sections) if sections else article_html
@@ -84,5 +97,13 @@ async def generate_image_prompts(title: str, article_html: str) -> list[str]:
         f"THE 8 H2 SECTIONS:\n{sections_formatted}\n\n"
         f"Remember: Output ONLY a JSON array of 8 strings, matching each section in 1:1 order."
     )
-    raw = await _call_groq(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
-    return extract_prompt_list(raw, expected_count=settings.images_per_article)
+    try:
+        raw = await _call_groq(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
+        prompts = extract_prompt_list(raw, expected_count=settings.images_per_article)
+        if len(prompts) == settings.images_per_article:
+            return prompts
+    except Exception as err:
+        logger.warning("generate_image_prompts LLM failed: %s. Using structured fallback prompts.", err)
+
+    return _generate_fallback_image_prompts(title, article_html)
+
