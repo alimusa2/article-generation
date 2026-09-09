@@ -168,15 +168,23 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
 def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:
     import re, json
     h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", article_html, re.IGNORECASE | re.DOTALL)
-    title_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip() if h1_match else "Rustic Stone Fireplace Inspiration for 2026"
-    slug = re.sub(r"[^\w\s-]", "", title_text.lower()).strip().replace(" ", "-")[:70]
+    title_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip() if h1_match else "Home Interior Decor Guide"
+    raw_slug = re.sub(r"[^\w\s-]", "", title_text.lower()).strip().replace(" ", "-")
+    slug = re.sub(r"-+", "-", raw_slug)[:70].strip("-")
+
+    words = [
+        w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", title_text)
+        if w.lower() not in ("the", "and", "for", "with", "your", "ideas", "best", "top", "how", "ways", "tips", "guide")
+    ]
+    focus_kw = " ".join(words[:2]) if words else title_text.lower()[:30]
+    sec_kws = [f"{w} decor" for w in words[:3]] + ["interior design", "home styling"]
 
     seo = SeoMetadata(
-        seo_title=f"{title_text[:45]} Inspiration for 2026" if len(title_text) <= 45 else title_text[:55],
-        meta_description=f"Explore expert design ideas, styling tips, and inspiration for {title_text.lower()} to transform your living space with cozy modern decor."[:155],
+        seo_title=f"{title_text[:45]} Guide 2026" if len(title_text) <= 45 else title_text[:55],
+        meta_description=f"Explore expert design ideas, styling tips, and inspiration for {title_text.lower()} to transform your home with modern decor."[:155],
         url_slug=slug,
-        focus_keyphrase="rustic stone fireplace",
-        secondary_keywords=["stone fireplace", "living room decor", "fireplace design", "cozy home inspiration"],
+        focus_keyphrase=focus_kw,
+        secondary_keywords=list(set(sec_kws))[:4],
     )
     return seo, json.dumps(seo.model_dump())
 

@@ -1,9 +1,12 @@
+import re
+import logging
 import httpx
 from app.config import settings
 from app.utils.retry import external_call_retry
+from app.services.seo_service import _call_openrouter
 
-# Same system prompt as the n8n "write the article" node — keep this in sync
-# if you tweak the prompt; don't fork it silently between the two.
+logger = logging.getLogger("article_service")
+
 ARTICLE_SYSTEM_PROMPT = """You are an experienced home decor writer and interior stylist, with hands-on experience designing and renovating real bedrooms, living rooms, and other home spaces. You write to rank on Google — not just to sound pretty.
 
 GOAL
@@ -52,71 +55,71 @@ STEP 5 — FORMATTING OUTPUT
 Before finishing, verify: word count is 1000-1200, there are exactly 8 H2 sections, exactly 8 [image space] placeholders exist (one per section, none elsewhere), headings are research-driven, and at least one first-hand-sounding line appears per section."""
 
 
-import logging
-from app.services.seo_service import _call_openrouter
-
-logger = logging.getLogger("article_service")
-
-
 def _generate_fallback_article(title: str) -> str:
-    """Generates a high-quality fallback HTML article matching system prompt rules when external LLMs are unreachable."""
+    """Generates a high-quality, dynamic fallback HTML article based on the user's requested topic/title."""
     clean_title = title.strip()
-    sections_data = [
+    words = [
+        w for w in clean_title.split()
+        if len(w) > 2 and w.lower() not in ("the", "and", "for", "with", "your", "ideas", "best", "top", "how", "ways", "tips")
+    ]
+    topic = " ".join(words) if words else clean_title
+
+    subtopics = [
         (
-            "1. Architectural Stone Selection and Textures",
-            "Selecting the right stone style establishes the foundational character of your fireplace. Stacked stone veneer and dry-stacked fieldstone provide immediate visual weight, rich dimensional depth, and enduring rustic charm. Pair raw stone surfaces with soft organic textures like wool rugs and linen upholstery to create a warm balance."
+            f"1. Key Design Principles & Materials for {topic.title()}",
+            f"Incorporating {topic.lower()} starts with selecting authentic materials, tactile textures, and balanced structural proportions. Focus on natural wood grains, warm metals, or durable upholstery to establish a solid design foundation."
         ),
         (
-            "2. Reclaimed Timber Mantel Framing",
-            "A heavy, hand-hewn reclaimed timber mantel creates an authentic bridge between rough masonry and refined interior decor. Mounting the beam at standard hearth height frames decorative accents like antique brass candlesticks or textured ceramic vases effortlessly while keeping focus on the fire."
+            f"2. Color Palette & Ambient Lighting Balance",
+            f"Pair {topic.lower()} with complementary wall tones such as soft ivory, warm taupe, charcoal, or terracotta. Layer natural window light with warm downlights to accentuate depth and surface details."
         ),
         (
-            "3. Floor-to-Ceiling Vertical Masonry",
-            "Running stone masonry continuously from the hearth up to the ceiling line draws the eye upward and dramatically expands the perceived volume of living spaces. Vertical stone installations turn standard fireplaces into commanding architectural focal points."
+            f"3. Optimal Spatial Layout & Traffic Flow",
+            f"Arrange furniture around your {topic.lower()} focal points while keeping walkways clear and navigable. Maintain comfortable sightlines and proportion ratios so the space feels cohesive and ergonomic."
         ),
         (
-            "4. Earthy Color Palettes and Mortar Tones",
-            "Harmonize natural stone variations with warm terracotta, charcoal, soft cream, and muted olive wall tones. Paying attention to mortar line color—opting for warm tan or off-white over stark grey—ensures a cohesive, sun-warmed aesthetic throughout the room."
+            f"4. Layering Textures, Fabrics & Finishes",
+            f"Enhance the character of {topic.lower()} by layering contrasting materials—such as linen drapery, wool area rugs, matte black accents, and polished stone—for a rich, multi-dimensional look."
         ),
         (
-            "5. Flush Recessed Hearth Designs",
-            "Modern rustic interiors benefit from flush or low-profile hearths that seamlessly integrate with hardwood or stone flooring. This contemporary layout maximizes usable floor space, simplifies furniture placement, and keeps sightlines uncluttered."
+            f"5. Smart Budget-Friendly Styling Swaps",
+            f"Achieve a high-end interior look with {topic.lower()} on a reasonable budget. Swap expensive solid pieces for quality veneers, thrift vintage accent decor, or apply targeted DIY paint treatments."
         ),
         (
-            "6. Layered Ambient & Accent Lighting",
-            "Strategic lighting brings out the rich tactile quality of natural stone after sunset. Position warm downlights or concealed LED strip lighting above the mantel to cast soft shadows across the stone relief without introducing harsh glare."
+            f"6. Adapting {topic.title()} for Small Spaces & Apartments",
+            f"For compact rooms, scale down {topic.lower()} elements and utilize vertical wall space. Light-reflecting surfaces, floating shelves, and low-profile furniture help maximize room volume."
         ),
         (
-            "7. Ergonomic Fireside Seating Arrangements",
-            "Position a pair of deep lounge chairs or a plush low-profile sectional angled directly toward the hearth. Ensure comfortable traffic clearance between seating and the hearth apron so the room remains both cozy and effortlessly navigable."
+            f"7. Styling Mistakes & Over-Decorating Pitfalls to Avoid",
+            f"Avoid crowding your {topic.lower()} setup with excessive small decorative knick-knacks. Stick to a restricted 3-color palette and allow key statement pieces space to breathe."
         ),
         (
-            "8. Curated Organic Decor and Natural Accents",
-            "Complete your fireplace vignette with potted olive trees, woven log baskets, and matte black iron fire tools. Integrating natural botanical elements softens rugged stonework without overwhelming the mantel display."
+            f"8. Final Organic Touches & Botanical Accents",
+            f"Complete your {topic.lower()} styling with organic accents such as potted indoor plants, woven seagrass baskets, and curated coffee table books for an inviting, lived-in aesthetic."
         ),
     ]
 
     h2_blocks = []
-    for heading, text in sections_data:
+    for heading, text in subtopics:
         h2_blocks.append(f"<h2>{heading}</h2>\n<p>{text}</p>\n[image space]")
 
     body_html = "\n\n".join(h2_blocks)
 
     return f"""<h1>{clean_title}</h1>
-<p>A rustic stone fireplace brings warmth, character, and timeless beauty to any living space. Natural materials and earthy design elements continue to redefine modern interior design, creating cozy environments that feel both elegant and deeply inviting.</p>
+<p>Transforming your space with {clean_title.lower()} brings warmth, character, and functional beauty to any room. Explore practical styling advice, color pairings, and expert interior design ideas to elevate your home effortlessly.</p>
 
 {body_html}
 
 <h2>Frequently Asked Questions</h2>
-<h3>Q: What is the best stone type for a cozy living room fireplace?</h3>
-<p>A: Stacked stone veneer and natural fieldstone are top choices for their rich textures, visual warmth, and versatility across rustic and modern aesthetic styles.</p>
-<h3>Q: How do you style a mantel on a rustic stone fireplace?</h3>
-<p>A: Keep decorative items balanced and minimal. Use a thick reclaimed wood beam paired with subtle accent lighting, framed artwork, and natural greenery.</p>
-<h3>Q: Do floor-to-ceiling stone fireplaces work in small living rooms?</h3>
-<p>A: Yes, drawing stone vertically creates visual height, making compact spaces feel taller, airier, and more open.</p>
+<h3>Q: What is the best way to start styling {topic.lower()}?</h3>
+<p>A: Begin with your primary focal piece, choose a cohesive 3-color palette, and layer secondary textures like rugs and ambient lighting around it.</p>
+<h3>Q: Can {topic.lower()} suit modern and traditional spaces?</h3>
+<p>A: Yes, natural materials and balanced proportions allow {topic.lower()} to transition seamlessly between contemporary minimalist and classic rustic interiors.</p>
+<h3>Q: How do I keep {topic.lower()} looking uncluttered in smaller rooms?</h3>
+<p>A: Stick to low-profile furniture, utilize vertical storage solutions, and keep decorative accessories curated rather than crowded.</p>
 
 <h2>Conclusion</h2>
-<p>Investing in a rustic stone fireplace adds unmatched architectural interest and cozy elegance to your home. Start by choosing your preferred stone texture and build a harmonious color palette around its natural warmth.</p>"""
+<p>Integrating {clean_title.lower()} adds timeless architectural interest and cozy elegance to your living space. Start by selecting your core materials and build a harmonious color palette for an elevated, professional result.</p>"""
 
 
 @external_call_retry
@@ -151,4 +154,3 @@ async def generate_article(title: str) -> str:
         logger.warning("LLM call failed for generate_article: %s. Using structured fallback article.", err)
 
     return _generate_fallback_article(title)
-
