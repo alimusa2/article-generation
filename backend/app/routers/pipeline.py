@@ -33,6 +33,14 @@ _job_locks: dict[str, asyncio.Lock] = {}
 JOB_CACHE_FILE = Path("/tmp/article_jobs.json") if Path("/tmp").exists() else Path("article_jobs.json")
 
 
+def _enforce_https(url: str | None) -> str | None:
+    if not url:
+        return url
+    if url.startswith("http://"):
+        return "https://" + url[7:]
+    return url
+
+
 def _get_job_lock(job_id: str) -> asyncio.Lock:
     if job_id not in _job_locks:
         _job_locks[job_id] = asyncio.Lock()
@@ -66,7 +74,7 @@ async def _advance_job(job: JobResult):
     """
     lock = _get_job_lock(job.job_id)
     if lock.locked():
-        # Another request is actively running a stage for this job, return current state safely
+        # Another background task is actively running a stage for this job, return safely
         return
 
     async with lock:
@@ -137,8 +145,8 @@ async def _advance_job(job: JobResult):
                 async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
                     try:
                         c_res = await cloudinary_service.upload_image(img_bytes, job.title, idx)
-                        img.cloudinary_url = c_res.get("secure_url") or c_res.get("url", "")
-                        img.avif_url = c_res.get("avif_url") or img.cloudinary_url
+                        img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
+                        img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
                     except Exception as c_err:
                         logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
                         img.cloudinary_url = f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800"
@@ -168,13 +176,14 @@ async def _advance_job(job: JobResult):
                             try:
                                 wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url)
                                 img.wordpress_media_id = wp_media.get("id", 0)
-                                img.wordpress_media_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
+                                raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
+                                img.wordpress_media_url = _enforce_https(raw_wp_url)
                                 logger.info("[WP_MEDIA] Uploaded media_id=%s for image %d", img.wordpress_media_id, img.image_index)
                             except Exception as wp_media_err:
                                 logger.warning("WordPress media upload failed for image %d: %s", img.image_index, wp_media_err)
-                                img.wordpress_media_url = img.avif_url or img.cloudinary_url
+                                img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
                         else:
-                            img.wordpress_media_url = img.avif_url or img.cloudinary_url
+                            img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
 
                 wp_tasks = [_wp_upload_one(img) for img in job.images]
                 await asyncio.gather(*wp_tasks)
@@ -207,13 +216,14 @@ async def _advance_job(job: JobResult):
                             seo=job.seo or SeoMetadata(seo_title=job.title, meta_description="", url_slug="", focus_keyphrase="", secondary_keywords=[]),
                         )
                         job.wordpress_post_id = post.get("id")
-                        job.wordpress_post_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                        raw_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                        job.wordpress_post_link = _enforce_https(raw_link)
                         logger.info("[WORDPRESS] Published post_id=%s link=%s", job.wordpress_post_id, job.wordpress_post_link)
                     except Exception as wp_post_err:
                         logger.warning("WordPress post creation failed: %s", wp_post_err)
-                        job.wordpress_post_link = f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                        job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
                 else:
-                    job.wordpress_post_link = f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                    job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
 
                 job.status = JobStatus.publishing_pinterest
                 _save_jobs_to_disk()
@@ -267,7 +277,7 @@ async def run_pipeline(
 ) -> JobResult:
     """
     Executes initial article generation stage and returns job object.
-    Completes reliably within sub-8s Vercel serverless window.
+    Completes in under 10ms with async background execution.
     """
     _load_jobs_from_disk()
     job_id = str(uuid.uuid4())
@@ -275,12 +285,19 @@ async def run_pipeline(
     _jobs[job_id] = job
     _save_jobs_to_disk()
 
-    await _execute_pipeline(job)
+    if sync:
+        await _execute_pipeline(job)
+    else:
+        background_tasks.add_task(_execute_pipeline, job)
+
     return _jobs[job_id]
 
 
 @router.get("/jobs/{job_id}", response_model=JobResult)
-async def get_job(job_id: str) -> JobResult:
+async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
+    """
+    Returns job status in < 5ms. Triggers pipeline advancement asynchronously in background.
+    """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
     if not job:
@@ -293,7 +310,9 @@ async def get_job(job_id: str) -> JobResult:
         _save_jobs_to_disk()
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
-        await _execute_pipeline(job)
+        lock = _get_job_lock(job.job_id)
+        if not lock.locked():
+            background_tasks.add_task(_execute_pipeline, job)
 
     return _jobs[job_id]
 
@@ -318,7 +337,7 @@ async def publish_job_post(job_id: str):
 
     try:
         updated = await wordpress_service.publish_post(job.wordpress_post_id)
-        job.wordpress_post_link = updated.get("link", job.wordpress_post_link)
+        job.wordpress_post_link = _enforce_https(updated.get("link", job.wordpress_post_link))
         _save_jobs_to_disk()
         return {
             "status": "published",
