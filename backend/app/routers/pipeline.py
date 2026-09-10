@@ -111,34 +111,46 @@ async def _advance_job(job: JobResult):
                     continue
 
                 # -------------------------------------------------------------
-                # STAGE 2: Generate SEO Metadata
+                # STAGE 2 & 3: Generate SEO Metadata & Image Prompts in Parallel
                 # -------------------------------------------------------------
-                if not job.seo:
+                if not job.seo or not job.images:
                     job.status = JobStatus.generating_seo
                     _save_jobs_to_disk()
-                    logger.info("[SEO] Started Stage 2 for job %s", job.job_id)
-                    seo_tuple = await seo_service.generate_seo_metadata(job.article_html)
-                    job.seo, _raw_seo_text = seo_tuple
-                    job.status = JobStatus.generating_image_prompts
-                    _save_jobs_to_disk()
-                    logger.info("[SEO] Completed Stage 2 for job %s", job.job_id)
-                    continue
+                    logger.info("[SEO & PROMPTS] Running Stage 2 & 3 in parallel for job %s", job.job_id)
 
-                # -------------------------------------------------------------
-                # STAGE 3: Generate Image Prompts
-                # -------------------------------------------------------------
-                if not job.images:
-                    job.status = JobStatus.generating_image_prompts
-                    _save_jobs_to_disk()
-                    logger.info("[IMAGE_PROMPTS] Started Stage 3 for job %s", job.job_id)
-                    prompts = await image_prompt_service.generate_image_prompts(job.title, job.article_html)
-                    job.images = [
-                        GeneratedImage(prompt=prompt, image_index=idx)
-                        for idx, prompt in enumerate(prompts, start=1)
-                    ]
+                    async def _gen_seo():
+                        return await seo_service.generate_seo_metadata(job.article_html)
+
+                    async def _gen_prompts():
+                        return await image_prompt_service.generate_image_prompts(job.title, job.article_html)
+
+                    tasks = []
+                    do_seo = not job.seo
+                    do_prompts = not job.images
+
+                    if do_seo:
+                        tasks.append(_gen_seo())
+                    if do_prompts:
+                        tasks.append(_gen_prompts())
+
+                    results = await asyncio.gather(*tasks)
+
+                    idx = 0
+                    if do_seo:
+                        seo_tuple = results[idx]
+                        job.seo, _raw_seo_text = seo_tuple
+                        idx += 1
+                    if do_prompts:
+                        prompts = results[idx]
+                        job.images = [
+                            GeneratedImage(prompt=prompt, image_index=i)
+                            for i, prompt in enumerate(prompts, start=1)
+                        ]
+                        idx += 1
+
                     job.status = JobStatus.generating_images
                     _save_jobs_to_disk()
-                    logger.info("[IMAGE_PROMPTS] Completed Stage 3 for job %s", job.job_id)
+                    logger.info("[SEO & PROMPTS] Completed Stage 2 & 3 in parallel for job %s", job.job_id)
                     continue
 
                 # -------------------------------------------------------------
