@@ -14,7 +14,7 @@ Read the provided 8 H2 article sections. For each H2 section in order (1 through
 
 STRICT RELEVANCE & QUALITY RULES:
 1. 100% RELEVANCE TO H2: Every image prompt MUST directly and accurately feature the exact primary subject, specific furniture piece, material, color, or lighting mentioned in that specific H2 heading. (e.g. If H2 1 is about "Terracotta Wall Accents", prompt 1 MUST be a luxury shot of a terracotta-accented wall; if H2 2 is about "Velvet Tufted Headboards", prompt 2 MUST feature a velvet tufted headboard — never generic plants, empty shelves, or random items).
-2. PREMIUM EDITORIAL PHOTOGRAPHY STYLE: Every prompt must specify: "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling".
+2. PREMIUM EDITORIAL PHOTOGRAPHY STYLE: Every prompt must specify: "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling, 1000x700 resolution, landscape 10:7 aspect ratio".
 3. SPECIFIC DECOR ELEMENTS: Describe exact textures, materials (linen, white oak, brushed brass, travertine, velvet), colors, and composition.
 4. NO TEXT / LOGOS / PEOPLE: Do not include on-screen text, brand logos, signs, or human faces.
 
@@ -74,17 +74,25 @@ async def _call_groq(system_prompt: str, user_prompt: str) -> str:
     return await _call_openrouter(system_prompt, user_prompt)
 
 
+def _clean_section_heading_for_prompt(sec_title: str) -> str:
+    """Strips leading numbers, generic prefixes, and returns a clean decor subject string."""
+    clean = re.sub(r"^\d+[\.\s\-]+", "", sec_title).strip()
+    # Strip meta prefixes like "Key Design Principles & Materials for ", "Smart Budget-Friendly Styling Swaps for "
+    clean = re.sub(r"^(?:key design principles (?:&|and) materials for|optimal spatial layout (?:&|and) traffic flow for|smart budget-friendly styling swaps for|adapting|styling mistakes (?:&|and) over-decorating pitfalls to avoid for)\s*", "", clean, flags=re.IGNORECASE).strip()
+    return clean or sec_title
+
+
 def _generate_fallback_image_prompts(title: str, article_html: str) -> list[str]:
     sections = _extract_h2_sections(article_html)
     prompts = []
-    base_style = "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling"
+    base_style = "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling, 1000x700 resolution"
     for idx in range(settings.images_per_article):
         if idx < len(sections):
             sec_title = sections[idx].split("\n")[0].replace(f"Section {idx+1} H2: ", "").strip()
-            clean_sec = re.sub(r"^\d+[\.\s\-]+", "", sec_title).strip()
-            prompts.append(f"{clean_sec}, {base_style}, featuring elegant interior composition and warm ambient decor.")
+            clean_sec = _clean_section_heading_for_prompt(sec_title)
+            prompts.append(f"Luxury interior design feature of {clean_sec}, {base_style}, featuring elegant spatial composition, warm ambient lighting, and rich textures.")
         else:
-            prompts.append(f"{title} - Scene {idx+1}, {base_style}, showcasing luxury modern home interior aesthetic.")
+            prompts.append(f"Luxury interior feature for {title} - Scene {idx+1}, {base_style}, showcasing high-end architectural aesthetic.")
     return prompts
 
 
@@ -107,4 +115,5 @@ async def generate_image_prompts(title: str, article_html: str) -> list[str]:
         logger.warning("generate_image_prompts LLM failed: %s. Using structured fallback prompts.", err)
 
     return _generate_fallback_image_prompts(title, article_html)
+
 

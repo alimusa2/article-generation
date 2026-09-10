@@ -22,7 +22,7 @@ def _auth_header() -> dict:
 # retryOnFail: false (no retry decorator applied)
 async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
     """
-    Downloads or decodes the JPEG image and re-uploads it to WP media.
+    Downloads or decodes the AVIF image and re-uploads it to WP media.
     Returns the media item dict including 'id' and 'url'.
     """
     if avif_url.startswith("data:"):
@@ -68,7 +68,7 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
 def replace_image_placeholders(article_html: str, media_urls: list[str]) -> str:
     """
     Replaces [image space] or [image...] placeholders with responsive figures,
-    matching n8n 'Code in JavaScript2' step 4 byte-for-byte.
+    matching n8n 'Code in JavaScript2' step 4 byte-for-byte with 1000x700 dimensions.
     """
     formatted_content = article_html
     if media_urls and formatted_content:
@@ -80,8 +80,8 @@ def replace_image_placeholders(article_html: str, media_urls: list[str]) -> str:
                 image_index[0] += 1
                 return (
                     f'<figure class="wp-block-image">'
-                    f'<img src="{url}" alt="Article Image {image_index[0]}" '
-                    f'style="max-width:100%;height:auto;display:block;margin:0 auto;" />'
+                    f'<img src="{url}" alt="Article Image {image_index[0]}" width="1000" height="700" '
+                    f'style="max-width:100%;height:auto;aspect-ratio:1000/700;display:block;margin:0 auto;" />'
                     f'</figure>'
                 )
             return ""
@@ -97,7 +97,7 @@ def replace_image_placeholders(article_html: str, media_urls: list[str]) -> str:
     if formatted_content:
         formatted_content = re.sub(
             r"<img (?!.*?style=)",
-            '<img style="max-width:100%;height:auto;display:block;margin:0 auto;" ',
+            '<img width="1000" height="700" style="max-width:100%;height:auto;aspect-ratio:1000/700;display:block;margin:0 auto;" ',
             formatted_content,
             flags=re.IGNORECASE,
         )

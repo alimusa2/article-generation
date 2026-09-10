@@ -157,27 +157,37 @@ async def _advance_job(job: JobResult):
 
                 job.status = JobStatus.uploading_images
                 _save_jobs_to_disk()
-                logger.info("[AVIF] Started Stage 5 (Cloudinary & JPEG conversion) for job %s", job.job_id)
+                logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
 
-                async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
+                used_urls: set[str] = set()
+
+                for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1):
                     h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
                     try:
-                        c_res = await cloudinary_service.upload_image(img_bytes, job.title, idx, h2_title=h2_title)
+                        c_res = await cloudinary_service.upload_image(
+                            img_bytes, job.title, idx, h2_title=h2_title, used_urls=used_urls
+                        )
                         img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
                         img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
                     except Exception as c_err:
                         logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        img.cloudinary_url = cloudinary_service.get_relevant_fallback_url(job.title, idx)
-                        img.avif_url = img.cloudinary_url
+                        fallback_u = cloudinary_service.get_relevant_fallback_url(job.title, idx, used_urls=used_urls)
+                        img.cloudinary_url = fallback_u
+                        img.avif_url = fallback_u
 
-                upload_tasks = [
-                    _upload_one(idx, img, img_bytes)
-                    for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
-                ]
-                await asyncio.gather(*upload_tasks)
+                # Strict deduplication verification pass across all job images
+                final_used: set[str] = set()
+                for idx, img in enumerate(job.images, start=1):
+                    h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
+                    if not img.avif_url or img.avif_url in final_used:
+                        unique_url = cloudinary_service.get_relevant_fallback_url(h2_title, idx, used_urls=final_used)
+                        img.avif_url = unique_url
+                        img.cloudinary_url = unique_url
+                    else:
+                        final_used.add(img.avif_url)
 
                 _save_jobs_to_disk()
-                logger.info("[AVIF] Completed Stage 5 for job %s", job.job_id)
+                logger.info("[AVIF] Completed Stage 5 for job %s with unique AVIF images", job.job_id)
                 return
 
             # -------------------------------------------------------------
