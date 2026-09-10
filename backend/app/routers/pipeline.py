@@ -159,23 +159,27 @@ async def _advance_job(job: JobResult):
                 _save_jobs_to_disk()
                 logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
 
-                used_urls: set[str] = set()
-
-                for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1):
+                async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
                     h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
                     try:
                         c_res = await cloudinary_service.upload_image(
-                            img_bytes, job.title, idx, h2_title=h2_title, used_urls=used_urls
+                            img_bytes, job.title, idx, h2_title=h2_title
                         )
                         img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
                         img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
                     except Exception as c_err:
                         logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        fallback_u = cloudinary_service.get_relevant_fallback_url(job.title, idx, used_urls=used_urls)
+                        fallback_u = cloudinary_service.get_relevant_fallback_url(h2_title or job.title, idx)
                         img.cloudinary_url = fallback_u
                         img.avif_url = fallback_u
 
-                # Strict deduplication verification pass across all job images
+                upload_tasks = [
+                    _upload_one(idx, img, img_bytes)
+                    for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
+                ]
+                await asyncio.gather(*upload_tasks)
+
+                # Fast post-upload deduplication verification pass across all job images (< 1ms)
                 final_used: set[str] = set()
                 for idx, img in enumerate(job.images, start=1):
                     h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
@@ -187,7 +191,7 @@ async def _advance_job(job: JobResult):
                         final_used.add(img.avif_url)
 
                 _save_jobs_to_disk()
-                logger.info("[AVIF] Completed Stage 5 for job %s with unique AVIF images", job.job_id)
+                logger.info("[AVIF] Completed Stage 5 for job %s with parallel upload & unique AVIF images", job.job_id)
                 return
 
             # -------------------------------------------------------------
