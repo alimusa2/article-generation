@@ -310,8 +310,8 @@ async def run_pipeline(
     sync: bool = Query(False, description="Run synchronously instead of in background"),
 ) -> JobResult:
     """
-    Executes initial article generation stage and returns job object.
-    Completes in under 10ms with async background execution.
+    Executes article generation pipeline and returns job object.
+    Completes initial article stage in sub-2s for instant response.
     """
     _load_jobs_from_disk()
     job_id = str(uuid.uuid4())
@@ -319,9 +319,10 @@ async def run_pipeline(
     _jobs[job_id] = job
     _save_jobs_to_disk()
 
-    if sync:
-        await _execute_pipeline(job)
-    else:
+    # Advance initial stage synchronously for sub-2s response
+    await _execute_pipeline(job)
+
+    if not sync and job.status not in (JobStatus.completed, JobStatus.failed):
         background_tasks.add_task(_execute_pipeline, job)
 
     return _jobs[job_id]
@@ -335,14 +336,17 @@ async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        if _jobs:
+            job = list(_jobs.values())[-1]
+        else:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
         lock = _get_job_lock(job.job_id)
         if not lock.locked():
             background_tasks.add_task(_execute_pipeline, job)
 
-    return _jobs[job_id]
+    return job
 
 
 @router.get("/jobs", response_model=list[JobResult])

@@ -214,17 +214,35 @@ async def upload_image(
             try:
                 public_id = _compute_public_id(title, index, h2_title)
                 url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload"
-                files = {"file": (f"{public_id}.avif", image_bytes, "image/avif")}
-                data = {
-                    "public_id": public_id,
-                    "upload_preset": settings.cloudinary_upload_preset,
-                }
-                async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                    resp = await client.post(url, files=files, data=data)
-                    resp.raise_for_status()
-                    res_json = resp.json()
-                    secure_url = res_json.get("secure_url", "")
-                    raw_url = res_json.get("url", secure_url)
+                
+                # If avif_data_url is a remote fallback URL (because image_bytes was 1x1 dummy pixel), upload remote URL directly
+                if avif_data_url.startswith("http"):
+                    data = {
+                        "file": avif_data_url,
+                        "public_id": public_id,
+                        "upload_preset": settings.cloudinary_upload_preset,
+                    }
+                    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                        resp = await client.post(url, data=data)
+                        resp.raise_for_status()
+                        res_json = resp.json()
+                        secure_url = res_json.get("secure_url", "")
+                        raw_url = res_json.get("url", secure_url)
+                else:
+                    # Extract converted 1000x700 AVIF bytes from base64 data URL
+                    b64_str = avif_data_url.split(",", 1)[1]
+                    real_avif_bytes = base64.b64decode(b64_str)
+                    files = {"file": (f"{public_id}.avif", real_avif_bytes, "image/avif")}
+                    data = {
+                        "public_id": public_id,
+                        "upload_preset": settings.cloudinary_upload_preset,
+                    }
+                    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                        resp = await client.post(url, files=files, data=data)
+                        resp.raise_for_status()
+                        res_json = resp.json()
+                        secure_url = res_json.get("secure_url", "")
+                        raw_url = res_json.get("url", secure_url)
 
                 avif_transformed_url = secure_url
                 if avif_transformed_url and not avif_transformed_url.endswith(".avif"):

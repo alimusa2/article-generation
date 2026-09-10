@@ -122,7 +122,6 @@ def _generate_fallback_article(title: str) -> str:
 <p>Integrating {clean_title.lower()} adds timeless architectural interest and cozy elegance to your living space. Start by selecting your core materials and build a harmonious color palette for an elevated, professional result.</p>"""
 
 
-@external_call_retry
 async def generate_article(title: str) -> str:
     """Calls OpenRouter/Gemini LLM pipeline to generate raw HTML article, with fallback on error."""
     system_prompt = ARTICLE_SYSTEM_PROMPT
