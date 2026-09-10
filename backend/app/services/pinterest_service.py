@@ -123,9 +123,11 @@ async def create_pins_for_images(
     description = parse_pinterest_description(raw_seo_text)
     target_board_id = board_id or settings.pinterest_board_id or "1086423178800607052"
 
+    from app.services.cloudinary_service import convert_bytes_to_avif_data_url, _create_procedural_ai_asset
     results: list[dict] = []
     urls = cloudinary_image_urls if cloudinary_image_urls else [
-        f"https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800" for _ in range(8)
+        convert_bytes_to_avif_data_url(_create_procedural_ai_asset(title, i), title=title, fallback_index=i)
+        for i in range(1, 9)
     ]
 
     for idx in range(1, 9):

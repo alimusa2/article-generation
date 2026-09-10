@@ -173,7 +173,7 @@ export default function PublishingStatusCard({ wordpressPostLink, isPublished, w
             {pinterestPins.map((pin, idx) => (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #f3f4f6' }}>
                 <img
-                  src={pin.image_url || pin.media_source?.url || 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=200'}
+                  src={pin.image_url || pin.media_source?.url || ''}
                   alt={pin.title || `Pin ${idx + 1}`}
                   style={{ width: '40px', height: '28px', objectFit: 'cover', borderRadius: '4px' }}
                 />

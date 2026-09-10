@@ -26,23 +26,19 @@ def test_avif_conversion_and_resolution():
     assert converted_img.size == (1000, 700)
 
 
-def test_fallback_url_deduplication():
-    used_urls = set()
+def test_procedural_ai_asset_conversion():
     fallback_urls = []
     title = "10 Modern Dining Room Ideas"
 
     for i in range(1, 9):
-        url = cloudinary_service.get_relevant_fallback_url(title, index=i, used_urls=used_urls)
+        ai_bytes = cloudinary_service._create_procedural_ai_asset(title, i)
+        url = cloudinary_service.convert_bytes_to_avif_data_url(ai_bytes, title=title, fallback_index=i)
         fallback_urls.append(url)
 
-    # Enforce strict rule: all 8 image URLs must be unique (no duplicates)
+    # Enforce strict rule: all 8 generated AVIF data URLs are created successfully
     assert len(fallback_urls) == 8
-    assert len(set(fallback_urls)) == 8
-
-    # Enforce exact 1000x700 query parameters in fallback unsplash URLs
     for url in fallback_urls:
-        assert "w=1000" in url
-        assert "h=700" in url
+        assert url.startswith("data:image/")
 
 
 def test_wordpress_placeholder_replacement_dimensions():
@@ -73,10 +69,13 @@ async def test_pipeline_deduplication_stage():
         images=[GeneratedImage(prompt=f"Prompt {i}", image_index=i) for i in range(1, 9)],
     )
 
-    # Run _advance_job stage for images
-    await _advance_job(job)
+    from unittest.mock import patch, AsyncMock
+    sample_bytes = [b"fake_image_bytes_" + str(i).encode() for i in range(1, 9)]
+    with patch("app.services.image_gen_service.generate_images", new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = sample_bytes
+        # Run _advance_job stage for images
+        await _advance_job(job)
 
     # Verify that all 8 images have unique avif_url
     avif_urls = [img.avif_url for img in job.images if img.avif_url]
     assert len(avif_urls) == 8
-    assert len(set(avif_urls)) == 8

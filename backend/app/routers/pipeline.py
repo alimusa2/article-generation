@@ -84,7 +84,7 @@ def _extract_h2_titles(html: str) -> list[str]:
 
 async def _advance_job(job: JobResult):
     """
-    Advances a job by executing the NEXT single pending stage.
+    Advances a job through all pending stages in a single background execution loop.
     Uses asyncio.Lock per job to prevent concurrent duplicate stage executions.
     """
     lock = _get_job_lock(job.job_id)
@@ -93,210 +93,202 @@ async def _advance_job(job: JobResult):
         return
 
     async with lock:
-        if job.status in (JobStatus.completed, JobStatus.failed):
-            return
+        while job.status not in (JobStatus.completed, JobStatus.failed):
+            prev_status = job.status
+            try:
+                # -------------------------------------------------------------
+                # STAGE 1: Write Article
+                # -------------------------------------------------------------
+                if not job.article_html:
+                    job.status = JobStatus.writing_article
+                    _save_jobs_to_disk()
+                    logger.info("[ARTICLE] Started Stage 1 for job %s: '%s'", job.job_id, job.title)
+                    article_html = await article_service.generate_article(job.title)
+                    job.article_html = article_html
+                    job.status = JobStatus.generating_seo
+                    _save_jobs_to_disk()
+                    logger.info("[ARTICLE] Completed Stage 1 for job %s", job.job_id)
+                    continue
 
-        try:
-            # -------------------------------------------------------------
-            # STAGE 1: Write Article
-            # -------------------------------------------------------------
-            if not job.article_html:
-                job.status = JobStatus.writing_article
-                _save_jobs_to_disk()
-                logger.info("[ARTICLE] Started Stage 1 for job %s: '%s'", job.job_id, job.title)
-                article_html = await article_service.generate_article(job.title)
-                job.article_html = article_html
-                job.status = JobStatus.generating_seo
-                _save_jobs_to_disk()
-                logger.info("[ARTICLE] Completed Stage 1 for job %s", job.job_id)
-                return
+                # -------------------------------------------------------------
+                # STAGE 2: Generate SEO Metadata
+                # -------------------------------------------------------------
+                if not job.seo:
+                    job.status = JobStatus.generating_seo
+                    _save_jobs_to_disk()
+                    logger.info("[SEO] Started Stage 2 for job %s", job.job_id)
+                    seo_tuple = await seo_service.generate_seo_metadata(job.article_html)
+                    job.seo, _raw_seo_text = seo_tuple
+                    job.status = JobStatus.generating_image_prompts
+                    _save_jobs_to_disk()
+                    logger.info("[SEO] Completed Stage 2 for job %s", job.job_id)
+                    continue
 
-            # -------------------------------------------------------------
-            # STAGE 2: Generate SEO Metadata
-            # -------------------------------------------------------------
-            if not job.seo:
-                job.status = JobStatus.generating_seo
-                _save_jobs_to_disk()
-                logger.info("[SEO] Started Stage 2 for job %s", job.job_id)
-                seo_tuple = await seo_service.generate_seo_metadata(job.article_html)
-                job.seo, _raw_seo_text = seo_tuple
-                job.status = JobStatus.generating_image_prompts
-                _save_jobs_to_disk()
-                logger.info("[SEO] Completed Stage 2 for job %s", job.job_id)
-                return
+                # -------------------------------------------------------------
+                # STAGE 3: Generate Image Prompts
+                # -------------------------------------------------------------
+                if not job.images:
+                    job.status = JobStatus.generating_image_prompts
+                    _save_jobs_to_disk()
+                    logger.info("[IMAGE_PROMPTS] Started Stage 3 for job %s", job.job_id)
+                    prompts = await image_prompt_service.generate_image_prompts(job.title, job.article_html)
+                    job.images = [
+                        GeneratedImage(prompt=prompt, image_index=idx)
+                        for idx, prompt in enumerate(prompts, start=1)
+                    ]
+                    job.status = JobStatus.generating_images
+                    _save_jobs_to_disk()
+                    logger.info("[IMAGE_PROMPTS] Completed Stage 3 for job %s", job.job_id)
+                    continue
 
-            # -------------------------------------------------------------
-            # STAGE 3: Generate Image Prompts
-            # -------------------------------------------------------------
-            if not job.images:
-                job.status = JobStatus.generating_image_prompts
-                _save_jobs_to_disk()
-                logger.info("[IMAGE_PROMPTS] Started Stage 3 for job %s", job.job_id)
-                prompts = await image_prompt_service.generate_image_prompts(job.title, job.article_html)
-                job.images = [
-                    GeneratedImage(prompt=prompt, image_index=idx)
-                    for idx, prompt in enumerate(prompts, start=1)
-                ]
-                job.status = JobStatus.generating_images
-                _save_jobs_to_disk()
-                logger.info("[IMAGE_PROMPTS] Completed Stage 3 for job %s", job.job_id)
-                return
+                # -------------------------------------------------------------
+                # STAGE 4: Generate Images & Cloudinary Upload (Parallelized)
+                # -------------------------------------------------------------
+                section_titles = _extract_h2_titles(job.article_html)
 
-            # -------------------------------------------------------------
-            # STAGE 4: Generate Images & Cloudinary Upload (Parallelized)
-            # -------------------------------------------------------------
-            section_titles = _extract_h2_titles(job.article_html)
+                if any(not img.cloudinary_url for img in job.images):
+                    job.status = JobStatus.generating_images
+                    _save_jobs_to_disk()
+                    logger.info("[IMAGES] Started Stage 4 for job %s", job.job_id)
+                    prompts = [img.prompt for img in job.images]
+                    image_bytes_list = await image_gen_service.generate_images(prompts)
+                    logger.info("[IMAGES] Completed image generation for job %s", job.job_id)
 
-            if any(not img.cloudinary_url for img in job.images):
-                job.status = JobStatus.generating_images
-                _save_jobs_to_disk()
-                logger.info("[IMAGES] Started Stage 4 for job %s", job.job_id)
-                prompts = [img.prompt for img in job.images]
-                image_bytes_list = await image_gen_service.generate_images(prompts)
-                logger.info("[IMAGES] Completed image generation for job %s", job.job_id)
+                    job.status = JobStatus.uploading_images
+                    _save_jobs_to_disk()
+                    logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
 
-                job.status = JobStatus.uploading_images
-                _save_jobs_to_disk()
-                logger.info("[AVIF] Started Stage 5 (Cloudinary & AVIF conversion) for job %s", job.job_id)
+                    async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
+                        h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
+                        try:
+                            c_res = await cloudinary_service.upload_image(
+                                img_bytes, job.title, idx, h2_title=h2_title
+                            )
+                            img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
+                            img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
+                        except Exception as c_err:
+                            logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
+                            ai_url = cloudinary_service.convert_bytes_to_avif_data_url(img_bytes, title=h2_title, fallback_index=idx)
+                            img.cloudinary_url = ai_url
+                            img.avif_url = ai_url
 
-                async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
-                    h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
-                    try:
-                        c_res = await cloudinary_service.upload_image(
-                            img_bytes, job.title, idx, h2_title=h2_title
-                        )
-                        img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
-                        img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
-                    except Exception as c_err:
-                        logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        fallback_u = cloudinary_service.get_relevant_fallback_url(h2_title or job.title, idx)
-                        img.cloudinary_url = fallback_u
-                        img.avif_url = fallback_u
+                    upload_tasks = [
+                        _upload_one(idx, img, img_bytes)
+                        for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
+                    ]
+                    await asyncio.gather(*upload_tasks)
 
-                upload_tasks = [
-                    _upload_one(idx, img, img_bytes)
-                    for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
-                ]
-                await asyncio.gather(*upload_tasks)
+                    _save_jobs_to_disk()
+                    logger.info("[AVIF] Completed Stage 5 for job %s with parallel upload & 100%% AI generated AVIF images", job.job_id)
+                    continue
 
-                # Fast post-upload deduplication verification pass across all job images (< 1ms)
-                final_used: set[str] = set()
-                for idx, img in enumerate(job.images, start=1):
-                    h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
-                    if not img.avif_url or img.avif_url in final_used:
-                        unique_url = cloudinary_service.get_relevant_fallback_url(h2_title, idx, used_urls=final_used)
-                        img.avif_url = unique_url
-                        img.cloudinary_url = unique_url
-                    else:
-                        final_used.add(img.avif_url)
+                # -------------------------------------------------------------
+                # STAGE 5 & 6: Upload WordPress Media & Inject Real Media URLs (Parallelized)
+                # -------------------------------------------------------------
+                if any(not img.wordpress_media_url for img in job.images) or not job.formatted_content:
+                    job.status = JobStatus.uploading_images
+                    _save_jobs_to_disk()
+                    logger.info("[WP_MEDIA] Started Stage 6 (WordPress Media Upload) for job %s", job.job_id)
 
-                _save_jobs_to_disk()
-                logger.info("[AVIF] Completed Stage 5 for job %s with parallel upload & unique AVIF images", job.job_id)
-                return
-
-            # -------------------------------------------------------------
-            # STAGE 5 & 6: Upload WordPress Media & Inject Real Media URLs (Parallelized)
-            # -------------------------------------------------------------
-            if any(not img.wordpress_media_url for img in job.images) or not job.formatted_content:
-                job.status = JobStatus.uploading_images
-                _save_jobs_to_disk()
-                logger.info("[WP_MEDIA] Started Stage 6 (WordPress Media Upload) for job %s", job.job_id)
-
-                async def _wp_upload_one(img: GeneratedImage):
-                    if not img.wordpress_media_url:
-                        h2_title = section_titles[img.image_index - 1] if img.image_index - 1 < len(section_titles) else job.title
-                        if settings.wordpress_username and settings.wordpress_app_password:
-                            try:
-                                wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url, h2_title=h2_title)
-                                img.wordpress_media_id = wp_media.get("id", 0)
-                                raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
-                                img.wordpress_media_url = _enforce_https(raw_wp_url)
-                                logger.info("[WP_MEDIA] Uploaded media_id=%s for image %d", img.wordpress_media_id, img.image_index)
-                            except Exception as wp_media_err:
-                                logger.warning("WordPress media upload failed for image %d: %s", img.image_index, wp_media_err)
+                    async def _wp_upload_one(img: GeneratedImage):
+                        if not img.wordpress_media_url:
+                            h2_title = section_titles[img.image_index - 1] if img.image_index - 1 < len(section_titles) else job.title
+                            if settings.wordpress_username and settings.wordpress_app_password:
+                                try:
+                                    wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url, h2_title=h2_title)
+                                    img.wordpress_media_id = wp_media.get("id", 0)
+                                    raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
+                                    img.wordpress_media_url = _enforce_https(raw_wp_url)
+                                    logger.info("[WP_MEDIA] Uploaded media_id=%s for image %d", img.wordpress_media_id, img.image_index)
+                                except Exception as wp_media_err:
+                                    logger.warning("WordPress media upload failed for image %d: %s", img.image_index, wp_media_err)
+                                    img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
+                            else:
                                 img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
-                        else:
-                            img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
 
-                wp_tasks = [_wp_upload_one(img) for img in job.images]
-                await asyncio.gather(*wp_tasks)
+                    wp_tasks = [_wp_upload_one(img) for img in job.images]
+                    await asyncio.gather(*wp_tasks)
 
-                # Replace placeholders in article HTML with real WordPress media URLs
-                media_urls = [img.wordpress_media_url for img in job.images]
-                job.formatted_content = wordpress_service.replace_image_placeholders(job.article_html, media_urls)
-                job.status = JobStatus.publishing_wordpress
-                _save_jobs_to_disk()
-                logger.info("[FINAL_ARTICLE] Prepared final HTML article with real WordPress media URLs for job %s", job.job_id)
-                return
+                    # Replace placeholders in article HTML with real WordPress media URLs
+                    media_urls = [img.wordpress_media_url for img in job.images]
+                    job.formatted_content = wordpress_service.replace_image_placeholders(job.article_html, media_urls)
+                    job.status = JobStatus.publishing_wordpress
+                    _save_jobs_to_disk()
+                    logger.info("[FINAL_ARTICLE] Prepared final HTML article with real WordPress media URLs for job %s", job.job_id)
+                    continue
 
-            # -------------------------------------------------------------
-            # STAGE 7: Publish Draft Post on WordPress
-            # -------------------------------------------------------------
-            if not job.wordpress_post_id:
-                job.status = JobStatus.publishing_wordpress
-                _save_jobs_to_disk()
-                logger.info("[WORDPRESS] Started Stage 7 for job %s", job.job_id)
+                # -------------------------------------------------------------
+                # STAGE 7: Publish Draft Post on WordPress
+                # -------------------------------------------------------------
+                if not job.wordpress_post_id:
+                    job.status = JobStatus.publishing_wordpress
+                    _save_jobs_to_disk()
+                    logger.info("[WORDPRESS] Started Stage 7 for job %s", job.job_id)
 
-                wp_base = settings.wordpress_base_url.rstrip('/')
-                featured_media_id = job.images[0].wordpress_media_id if (job.images and job.images[0].wordpress_media_id) else 0
+                    wp_base = settings.wordpress_base_url.rstrip('/')
+                    featured_media_id = job.images[0].wordpress_media_id if (job.images and job.images[0].wordpress_media_id) else 0
 
-                if settings.wordpress_username and settings.wordpress_app_password:
-                    try:
-                        post = await wordpress_service.create_post(
-                            title=job.title,
-                            content_html=job.formatted_content or job.article_html,
-                            featured_media_id=featured_media_id,
-                            seo=job.seo or SeoMetadata(seo_title=job.title, meta_description="", url_slug="", focus_keyphrase="", secondary_keywords=[]),
-                        )
-                        job.wordpress_post_id = post.get("id")
-                        raw_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
-                        job.wordpress_post_link = _enforce_https(raw_link)
-                        logger.info("[WORDPRESS] Published post_id=%s link=%s", job.wordpress_post_id, job.wordpress_post_link)
-                    except Exception as wp_post_err:
-                        logger.warning("WordPress post creation failed: %s", wp_post_err)
+                    if settings.wordpress_username and settings.wordpress_app_password:
+                        try:
+                            post = await wordpress_service.create_post(
+                                title=job.title,
+                                content_html=job.formatted_content or job.article_html,
+                                featured_media_id=featured_media_id,
+                                seo=job.seo or SeoMetadata(seo_title=job.title, meta_description="", url_slug="", focus_keyphrase="", secondary_keywords=[]),
+                            )
+                            job.wordpress_post_id = post.get("id")
+                            raw_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                            job.wordpress_post_link = _enforce_https(raw_link)
+                            logger.info("[WORDPRESS] Published post_id=%s link=%s", job.wordpress_post_id, job.wordpress_post_link)
+                        except Exception as wp_post_err:
+                            logger.warning("WordPress post creation failed: %s", wp_post_err)
+                            job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
+                    else:
                         job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
-                else:
-                    job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
 
-                job.status = JobStatus.publishing_pinterest
+                    job.status = JobStatus.publishing_pinterest
+                    _save_jobs_to_disk()
+                    continue
+
+                # -------------------------------------------------------------
+                # STAGE 8: Generate EXACTLY 8 Pinterest Pins with Section Titles & WP Link
+                # -------------------------------------------------------------
+                if not job.pinterest_pins:
+                    job.status = JobStatus.publishing_pinterest
+                    _save_jobs_to_disk()
+                    logger.info("[PINTEREST] Started Stage 8 (Generating 8 Pins) for job %s", job.job_id)
+
+                    wp_link = job.wordpress_post_link or f"{settings.wordpress_base_url.rstrip('/')}/{job.title.lower().replace(' ', '-')}"
+                    raw_seo_dict = job.seo.model_dump() if job.seo else {"meta_description": ""}
+                    cloudinary_urls = [img.cloudinary_url for img in job.images if img.cloudinary_url]
+
+                    pin_results = await pinterest_service.create_pins_for_images(
+                        title=job.title,
+                        wp_link=wp_link,
+                        raw_seo_text=raw_seo_dict,
+                        cloudinary_image_urls=cloudinary_urls,
+                        section_titles=section_titles,
+                    )
+                    job.pinterest_pins = pin_results
+                    if pin_results and isinstance(pin_results[0], dict) and "id" in pin_results[0]:
+                        job.pinterest_pin_id = str(pin_results[0]["id"])
+
+                    job.status = JobStatus.completed
+                    _save_jobs_to_disk()
+                    logger.info("[JOB] Completed successfully for job %s with %d Pinterest pins", job.job_id, len(job.pinterest_pins))
+                    break
+
+                if job.status == prev_status:
+                    break
+
+            except Exception as e:
+                failed_stage = job.status
+                job.status = JobStatus.failed
+                job.error = str(e)
+                job.error_stage = failed_stage
+                logger.exception("Pipeline failed for job %s at stage %s: %s", job.job_id, failed_stage, e)
                 _save_jobs_to_disk()
-                return
-
-            # -------------------------------------------------------------
-            # STAGE 8: Generate EXACTLY 8 Pinterest Pins with Section Titles & WP Link
-            # -------------------------------------------------------------
-            if not job.pinterest_pins:
-                job.status = JobStatus.publishing_pinterest
-                _save_jobs_to_disk()
-                logger.info("[PINTEREST] Started Stage 8 (Generating 8 Pins) for job %s", job.job_id)
-
-                wp_link = job.wordpress_post_link or f"{settings.wordpress_base_url.rstrip('/')}/{job.title.lower().replace(' ', '-')}"
-                raw_seo_dict = job.seo.model_dump() if job.seo else {"meta_description": ""}
-                cloudinary_urls = [img.cloudinary_url for img in job.images if img.cloudinary_url]
-
-                pin_results = await pinterest_service.create_pins_for_images(
-                    title=job.title,
-                    wp_link=wp_link,
-                    raw_seo_text=raw_seo_dict,
-                    cloudinary_image_urls=cloudinary_urls,
-                    section_titles=section_titles,
-                )
-                job.pinterest_pins = pin_results
-                if pin_results and isinstance(pin_results[0], dict) and "id" in pin_results[0]:
-                    job.pinterest_pin_id = str(pin_results[0]["id"])
-
-                job.status = JobStatus.completed
-                _save_jobs_to_disk()
-                logger.info("[JOB] Completed successfully for job %s with %d Pinterest pins", job.job_id, len(job.pinterest_pins))
-                return
-
-        except Exception as e:
-            failed_stage = job.status
-            job.status = JobStatus.failed
-            job.error = str(e)
-            job.error_stage = failed_stage
-            logger.exception("Pipeline failed for job %s at stage %s: %s", job.job_id, failed_stage, e)
-            _save_jobs_to_disk()
+                break
 
 
 # Alias for backward compatibility with test suite mocks
