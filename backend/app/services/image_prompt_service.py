@@ -16,7 +16,7 @@ STRICT RELEVANCE & QUALITY RULES:
 1. 100% RELEVANCE TO H2: Every image prompt MUST directly and accurately feature the exact primary subject, specific furniture piece, material, color, or lighting mentioned in that specific H2 heading. (e.g. If H2 1 is about "Terracotta Wall Accents", prompt 1 MUST be a luxury shot of a terracotta-accented wall; if H2 2 is about "Velvet Tufted Headboards", prompt 2 MUST feature a velvet tufted headboard — never generic plants, empty shelves, or random items).
 2. PREMIUM EDITORIAL PHOTOGRAPHY STYLE: Every prompt must specify: "Professional high-end interior architecture photograph, Architectural Digest style, soft natural window light, 35mm lens, 8k hyper-realistic detail, luxury styling, 1000x700 resolution, landscape 10:7 aspect ratio".
 3. SPECIFIC DECOR ELEMENTS: Describe exact textures, materials (linen, white oak, brushed brass, travertine, velvet), colors, and composition.
-4. NO TEXT / LOGOS / PEOPLE: Do not include on-screen text, brand logos, signs, or human faces.
+4. NO TEXT / LOGOS / PEOPLE / COMMERCIAL KITCHENS: Do not include on-screen text, brand logos, signs, human faces, chefs, food, or restaurant kitchens. All scenes MUST be residential home interiors.
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of exactly 8 strings, one per H2 section in order (1 to 8).
@@ -90,9 +90,9 @@ def _generate_fallback_image_prompts(title: str, article_html: str) -> list[str]
         if idx < len(sections):
             sec_title = sections[idx].split("\n")[0].replace(f"Section {idx+1} H2: ", "").strip()
             clean_sec = _clean_section_heading_for_prompt(sec_title)
-            prompts.append(f"Luxury interior design feature of {clean_sec}, {base_style}, featuring elegant spatial composition, warm ambient lighting, and rich textures.")
+            prompts.append(f"Luxury residential interior architecture feature of {clean_sec}, {base_style}, featuring cozy home living space composition, warm ambient lighting, and rich textures.")
         else:
-            prompts.append(f"Luxury interior feature for {title} - Scene {idx+1}, {base_style}, showcasing high-end architectural aesthetic.")
+            prompts.append(f"Luxury residential interior feature for {title} - Scene {idx+1}, {base_style}, showcasing high-end home architectural aesthetic.")
     return prompts
 
 

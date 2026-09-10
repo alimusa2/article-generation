@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # --- Cloudflare Workers AI (image generation) ---
     cloudflare_account_id: str = ""
     cloudflare_api_token: str = ""
-    cloudflare_image_model: str = "@cf/bytedance/stable-diffusion-xl-lightning"
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-1-schnell"
 
     # --- Cloudinary ---
     cloudinary_cloud_name: str = ""
