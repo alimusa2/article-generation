@@ -118,10 +118,14 @@ async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
 
 async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     """
-    Calls OpenRouter using the configured model (openrouter/free).
-    Includes recommended OpenRouter headers.
-    Falls back to Gemini API (gemini-2.5-flash) if OpenRouter fails or is rate-limited.
+    Calls Gemini API (gemini-2.5-flash) first for fast sub-2s response, or OpenRouter with tight timeout.
     """
+    if settings.gemini_api_key:
+        try:
+            return await _call_gemini_fallback(system_prompt, user_prompt)
+        except Exception as gemini_err:
+            logger.warning("Gemini API call failed: %s. Trying OpenRouter...", gemini_err)
+
     if settings.openrouter_api_key:
         model = settings.openrouter_model or "openrouter/free"
         headers = {
@@ -130,7 +134,7 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
             "X-Title": "Article Generation Desk",
         }
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=8) as client:
                 resp = await client.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,
@@ -155,14 +159,9 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
             logger.warning("OpenRouter model '%s' error: %s", model, err)
 
     if settings.gemini_api_key:
-        logger.info("Using Gemini fallback for LLM request")
-        try:
-            return await _call_gemini_fallback(system_prompt, user_prompt)
-        except Exception as gemini_err:
-            logger.error("Gemini fallback also failed: %s", gemini_err)
-            raise gemini_err
+        return await _call_gemini_fallback(system_prompt, user_prompt)
 
-    raise RuntimeError("Both OpenRouter and Gemini API calls failed.")
+    raise RuntimeError("Both Gemini and OpenRouter API calls failed.")
 
 
 def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:

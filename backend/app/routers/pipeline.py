@@ -335,13 +335,7 @@ async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
     if not job:
-        job = JobResult(
-            job_id=job_id,
-            status=JobStatus.pending,
-            title="10 Cozy Fireplace Ideas for Living Rooms",
-        )
-        _jobs[job_id] = job
-        _save_jobs_to_disk()
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
         lock = _get_job_lock(job.job_id)
