@@ -116,55 +116,16 @@ async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
     raise RuntimeError(f"Gemini fallback API call to '{model_name}' returned empty response.")
 
 
-async def _call_groq(system_prompt: str, user_prompt: str) -> str:
-    """Calls Groq API for ultra-fast sub-1s LPU inference."""
-    if settings.groq_api_key:
-        model = settings.groq_model or "llama-3.3-70b-versatile"
-        headers = {
-            "Authorization": f"Bearer {settings.groq_api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.5,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                if content:
-                    logger.info("Successfully generated response using Groq model '%s'", model)
-                    return content
-        except Exception as err:
-            logger.warning("Groq API call error: %s", err)
-    raise RuntimeError("Groq API call unavailable or failed.")
-
-
 async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     """
-    Tries Groq API first (sub-1s), then Gemini 2.5 Flash (sub-2s), then OpenRouter.
+    Calls Gemini 2.5 Flash as the primary fast LLM for instant sub-2s responses.
+    Falls back to OpenRouter if Gemini API key is missing or fails.
     """
-    if settings.groq_api_key:
-        try:
-            return await _call_groq(system_prompt, user_prompt)
-        except Exception as groq_err:
-            logger.warning("Groq call failed: %s. Trying Gemini...", groq_err)
-
     if settings.gemini_api_key:
         try:
             return await _call_gemini_fallback(system_prompt, user_prompt)
         except Exception as gemini_err:
-            logger.warning("Gemini API call failed: %s. Trying OpenRouter...", gemini_err)
+            logger.warning("Gemini 2.5 Flash call error: %s. Trying OpenRouter...", gemini_err)
 
     if settings.openrouter_api_key:
         model = settings.openrouter_model or "openrouter/free"
@@ -174,7 +135,7 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
             "X-Title": "Article Generation Desk",
         }
         try:
-            async with httpx.AsyncClient(timeout=6) as client:
+            async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,

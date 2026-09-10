@@ -107,7 +107,7 @@ async def generate_image_prompts(title: str, article_html: str) -> list[str]:
         f"Remember: Output ONLY a JSON array of 8 strings, matching each section in 1:1 order."
     )
     try:
-        raw = await _call_groq(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
+        raw = await _call_openrouter(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
         prompts = extract_prompt_list(raw, expected_count=settings.images_per_article)
         if len(prompts) == settings.images_per_article:
             return prompts
