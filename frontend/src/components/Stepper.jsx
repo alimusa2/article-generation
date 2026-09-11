@@ -3,22 +3,54 @@ import { STAGES } from '../constants/pipeline';
 
 export default function Stepper({ job }) {
   const getStageState = (stageId, index) => {
-    if (!job) {
-      if (index === 0) return 'active';
-      return 'pending';
+    // 1. If job is marked completed, all stages are completed
+    if (job?.status === 'completed') {
+      return 'completed';
     }
 
-    if (job.status === 'failed') {
-      if (job.error_stage === stageId) return 'failed';
+    // 2. If job failed at a specific stage
+    if (job?.status === 'failed') {
+      const failedIdx = STAGES.findIndex((s) => s.id === job.error_stage);
+      if (failedIdx !== -1) {
+        if (index < failedIdx) return 'completed';
+        if (index === failedIdx) return 'failed';
+        return 'pending';
+      }
     }
-    if (job.status === 'completed') return 'completed';
 
-    const currentIndex = STAGES.findIndex((s) => s.id === job.status);
-    if (currentIndex === -1) return 'pending';
+    const currentStatusIdx = job?.status ? STAGES.findIndex((s) => s.id === job.status) : -1;
 
-    if (index < currentIndex) return 'completed';
-    if (index === currentIndex) return 'active';
-    return 'pending';
+    // 3. Determine completion by data presence or status progress
+    let isCompleted = false;
+
+    if (currentStatusIdx !== -1 && index < currentStatusIdx) {
+      isCompleted = true;
+    } else if (job) {
+      if (stageId === 'writing_article' && job.article_html) isCompleted = true;
+      if (stageId === 'generating_seo' && job.seo) isCompleted = true;
+      if (stageId === 'generating_image_prompts' && job.images && job.images.length > 0) isCompleted = true;
+      if (stageId === 'generating_images' && job.images && job.images.some((i) => i.cloudinary_url || i.avif_url)) isCompleted = true;
+      if (stageId === 'uploading_images' && job.images && job.images.some((i) => i.wordpress_media_url)) isCompleted = true;
+      if (stageId === 'publishing_wordpress' && (job.wordpress_post_id || job.wordpress_post_link)) isCompleted = true;
+      if (stageId === 'publishing_pinterest' && (job.pinterest_pins && job.pinterest_pins.length > 0 || job.pinterest_pin_id)) isCompleted = true;
+    } else {
+      // Default state when viewing pre-loaded draft before running a job
+      isCompleted = true;
+    }
+
+    if (isCompleted && currentStatusIdx !== index) {
+      return 'completed';
+    }
+
+    if (currentStatusIdx === index) {
+      return 'active';
+    }
+
+    if (!job && index === 0) {
+      return 'completed';
+    }
+
+    return isCompleted ? 'completed' : 'pending';
   };
 
   const handleStepClick = (stageId) => {
@@ -64,3 +96,4 @@ export default function Stepper({ job }) {
     </section>
   );
 }
+

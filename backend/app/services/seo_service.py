@@ -93,7 +93,7 @@ logger = logging.getLogger("seo_service")
 
 
 async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
-    model_name = settings.gemini_model.replace("models/", "") if settings.gemini_model else "gemini-2.5-flash"
+    model_name = settings.gemini_model.replace("models/", "") if settings.gemini_model else "gemini-3.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},

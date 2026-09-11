@@ -170,15 +170,42 @@ body {
 }
 
 .stepper-step.completed .step-circle {
-  background-color: #ffffff;
-  border-color: #111827;
-  color: #111827;
+  background-color: #10b981;
+  border-color: #10b981;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.25);
+}
+
+.stepper-step.completed .step-label {
+  color: #059669;
+  font-weight: 600;
 }
 
 .stepper-step.active .step-circle {
   background-color: var(--brand-green);
   border-color: var(--brand-green);
   color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(30, 57, 42, 0.25);
+  animation: pulse-step 1.5s infinite ease-in-out;
+}
+
+.stepper-step.failed .step-circle {
+  background-color: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+@keyframes pulse-step {
+  0% {
+    box-shadow: 0 0 0 0px rgba(30, 57, 42, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(30, 57, 42, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(30, 57, 42, 0);
+  }
 }
 
 .step-label {
