@@ -219,6 +219,174 @@ body {
   color: #111827;
 }
 
+/* Active Step Spinner Icon */
+.active-spinner-icon {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin-step 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin-step {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Live Pipeline Progress Banner */
+.pipeline-progress-banner {
+  margin-top: 18px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid var(--brand-green);
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeInBanner 0.3s ease;
+}
+
+@keyframes fadeInBanner {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.progress-banner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.progress-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-dot-pulsing {
+  width: 7px;
+  height: 7px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: pulse-dot 1.4s infinite;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.progress-stage-title {
+  font-size: 0.88rem;
+  color: #374151;
+}
+
+.progress-stage-title strong {
+  color: #111827;
+}
+
+.progress-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.progress-timer {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4b5563;
+  font-family: var(--font-sans);
+}
+
+.progress-percent-badge {
+  background-color: var(--brand-green);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background-color: #f3f4f6;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #059669);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  position: relative;
+}
+
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0) 100%
+  );
+  animation: shimmer 1.8s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.progress-banner-footer {
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
 /* Two Column Layout */
 .main-layout-container {
   max-width: 1440px;

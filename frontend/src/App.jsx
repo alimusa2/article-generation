@@ -55,7 +55,22 @@ export default function App() {
   const [focusKeyword, setFocusKeyword] = useState(DEFAULT_ARTICLE.focusKeyword);
   const [slug, setSlug] = useState(DEFAULT_ARTICLE.slug);
 
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const pollIntervalRef = useRef(null);
+
+  // Timer for tracking active pipeline execution time
+  useEffect(() => {
+    let timer;
+    if (loading) {
+      setElapsedSeconds(0);
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [loading]);
 
   // Synchronize SEO state when background job produces metadata
   useEffect(() => {
@@ -106,6 +121,8 @@ export default function App() {
     setShowRunModal(false);
     setIsPublished(false);
     setCustomHeroUrl(null);
+    // Instantly reset job to Stage 1 Active so stepper resets visual state before API returns
+    setJob({ status: 'writing_article', title: newTopic });
 
     try {
       const data = await generateArticle(newTopic);
@@ -114,6 +131,7 @@ export default function App() {
     } catch (err) {
       setErrorMessage(err.message);
       setLoading(false);
+      setJob(null);
     }
   };
 
@@ -201,7 +219,7 @@ export default function App() {
       />
 
       {/* 7-Stage Connected Stepper */}
-      <Stepper job={job} />
+      <Stepper job={job} loading={loading} elapsedSeconds={elapsedSeconds} />
 
       {/* Error Notice */}
       {errorMessage && (
