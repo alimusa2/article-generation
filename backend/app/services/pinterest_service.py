@@ -60,6 +60,19 @@ async def get_user_boards(access_token: str | None = None) -> list[dict]:
     return []
 
 
+def _clean_pin_title(title: str) -> str:
+    """Removes leading section/step/pin numbers (e.g. '8. ', '7. ', '1) ') from pin titles."""
+    if not title:
+        return ""
+    cleaned = re.sub(
+        r"^(?:\s*(?:(?:section|step|pin)\s*)?\d+[\s\.\)\:\-]+\s*)+",
+        "",
+        title.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned if cleaned else title.strip()
+
+
 async def create_pin(
     board_id: str,
     title: str,
@@ -72,9 +85,10 @@ async def create_pin(
     Creates a single Pinterest pin via Pinterest API v5.
     """
     token = access_token or settings.pinterest_access_token
+    clean_title = _clean_pin_title(title)
     payload = {
         "board_id": board_id,
-        "title": title.strip(),
+        "title": clean_title,
         "link": wp_link,
         "description": description,
         "media_source": {
@@ -132,11 +146,12 @@ async def create_pins_for_images(
 
     for idx in range(1, 9):
         img_url = urls[idx - 1] if idx - 1 < len(urls) else urls[0]
-        pin_title = (
+        raw_pin_title = (
             section_titles[idx - 1]
             if (section_titles and idx - 1 < len(section_titles) and section_titles[idx - 1].strip())
             else f"{title} - Pin {idx}"
         )
+        pin_title = _clean_pin_title(raw_pin_title)
 
         if settings.pinterest_access_token:
             try:

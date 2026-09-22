@@ -127,3 +127,17 @@ def test_parse_pinterest_description_exact_and_unguarded():
     missing_key = '{"other_key": "val"}'
     assert parse_pinterest_description(missing_key) == ""
 
+
+def test_clean_pin_title():
+    from app.services.pinterest_service import _clean_pin_title
+
+    assert _clean_pin_title("8. Final Organic Touches & Botanical...") == "Final Organic Touches & Botanical..."
+    assert _clean_pin_title("7. Styling Mistakes & Over-Decorating...") == "Styling Mistakes & Over-Decorating..."
+    assert _clean_pin_title("6. Adapting Warm Fireplace Mantle...") == "Adapting Warm Fireplace Mantle..."
+    assert _clean_pin_title("5. Smart Budget-Friendly Styling Swaps") == "Smart Budget-Friendly Styling Swaps"
+    assert _clean_pin_title("1) Key Design Principles & Materials") == "Key Design Principles & Materials"
+    assert _clean_pin_title("Step 3: Color Palette & Ambient Lighting") == "Color Palette & Ambient Lighting"
+    assert _clean_pin_title("8. 7. 6. Repeated Numbers Title") == "Repeated Numbers Title"
+    assert _clean_pin_title("Modern Fireplace Design") == "Modern Fireplace Design"
+
+
