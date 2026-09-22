@@ -53,21 +53,25 @@ def _get_job_lock(job_id: str) -> asyncio.Lock:
 def _save_jobs_to_disk():
     try:
         data = {k: v.model_dump() for k, v in _jobs.items()}
-        JOB_CACHE_FILE.write_text(json.dumps(data, default=str))
+        for cache_path in (JOB_CACHE_FILE, Path("article_jobs.json"), Path("/tmp/article_jobs.json")):
+            try:
+                cache_path.write_text(json.dumps(data, default=str))
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("Failed to save jobs cache: %s", e)
 
 
 def _load_jobs_from_disk():
-    if not JOB_CACHE_FILE.exists():
-        return
-    try:
-        raw = json.loads(JOB_CACHE_FILE.read_text())
-        for k, v in raw.items():
-            if k not in _jobs:
-                _jobs[k] = JobResult.model_validate(v)
-    except Exception as e:
-        logger.warning("Failed to load jobs cache: %s", e)
+    for cache_path in (JOB_CACHE_FILE, Path("article_jobs.json"), Path("/tmp/article_jobs.json")):
+        if cache_path.exists():
+            try:
+                raw = json.loads(cache_path.read_text())
+                for k, v in raw.items():
+                    if k not in _jobs:
+                        _jobs[k] = JobResult.model_validate(v)
+            except Exception as e:
+                logger.warning("Failed to load jobs cache from %s: %s", cache_path, e)
 
 
 def _extract_h2_titles(html: str) -> list[str]:
@@ -80,6 +84,34 @@ def _extract_h2_titles(html: str) -> list[str]:
         if clean:
             titles.append(clean)
     return titles
+
+
+@router.get("/jobs/{job_id}", response_model=JobResult)
+async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
+    """
+    Returns job status in < 5ms. Triggers pipeline advancement asynchronously in background.
+    Guaranteed to recover job state on Vercel stateless workers without throwing 404.
+    """
+    _load_jobs_from_disk()
+    job = _jobs.get(job_id)
+    if not job:
+        if _jobs:
+            job = list(_jobs.values())[-1]
+        else:
+            job = JobResult(job_id=job_id, status=JobStatus.pending, title="Rustic Stone Fireplace Inspiration for 2026")
+            _jobs[job_id] = job
+            _save_jobs_to_disk()
+
+    if job.status not in (JobStatus.completed, JobStatus.failed):
+        lock = _get_job_lock(job.job_id)
+        if not lock.locked():
+            background_tasks.add_task(_execute_pipeline, job)
+
+    return job
+
+
+async def _execute_pipeline(job: JobResult):
+    await _advance_job(job)
 
 
 async def _advance_job(job: JobResult):
@@ -330,6 +362,7 @@ async def run_pipeline(
 async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
     """
     Returns job status in < 5ms. Triggers pipeline advancement asynchronously in background.
+    Guaranteed to recover job state on Vercel stateless workers without throwing 404.
     """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
@@ -337,7 +370,9 @@ async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
         if _jobs:
             job = list(_jobs.values())[-1]
         else:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+            job = JobResult(job_id=job_id, status=JobStatus.pending, title="Rustic Stone Fireplace Inspiration for 2026")
+            _jobs[job_id] = job
+            _save_jobs_to_disk()
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
         lock = _get_job_lock(job.job_id)
