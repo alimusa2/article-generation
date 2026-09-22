@@ -188,19 +188,23 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 4: Generate Images via Cloudflare Workers AI (Chunked in batches of 4)
+            # STAGE 4: Generate Images via Cloudflare Workers AI (Progressive 2-Image Batches for Vercel)
             # -------------------------------------------------------------
             section_titles = _extract_h2_titles(job.article_html)
 
-            if any(not img.cloudinary_url for img in job.images):
+            pending_images = [img for img in job.images if not img.cloudinary_url]
+            if pending_images:
                 job.status = JobStatus.generating_images
                 _save_jobs_to_disk()
-                logger.info("[IMAGES] Started Stage 4 (Cloudflare AI image generation) for job %s", job.job_id)
+                logger.info("[IMAGES] Generating Cloudflare AI image chunk (%d remaining) for job %s", len(pending_images), job.job_id)
 
-                prompts = [img.prompt for img in job.images]
+                # Process 2 images per polling step (~3.5s total < Vercel 10s serverless cap)
+                chunk = pending_images[:2]
+                prompts = [img.prompt for img in chunk]
                 image_bytes_list = await image_gen_service.generate_images(prompts)
 
-                async def _upload_one(idx: int, img: GeneratedImage, img_bytes: bytes):
+                async def _upload_one(img: GeneratedImage, img_bytes: bytes):
+                    idx = img.image_index
                     h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
                     try:
                         c_res = await cloudinary_service.upload_image(
@@ -215,10 +219,14 @@ async def _advance_job(job: JobResult):
                         img.avif_url = ai_url
 
                 upload_tasks = [
-                    _upload_one(idx, img, img_bytes)
-                    for idx, (img, img_bytes) in enumerate(zip(job.images, image_bytes_list), start=1)
+                    _upload_one(img, img_bytes)
+                    for img, img_bytes in zip(chunk, image_bytes_list)
                 ]
                 await asyncio.gather(*upload_tasks)
+
+                if any(not img.cloudinary_url for img in job.images):
+                    _save_jobs_to_disk()
+                    return
 
                 job.status = JobStatus.uploading_images
                 _save_jobs_to_disk()
