@@ -46,13 +46,12 @@ STEP 4 — E-E-A-T (this is critical — most competitor articles fail here)
 - Authoritativeness: reference known design movements or eras by name where useful (mid-century modern, Mediterranean, boho) to show real design knowledge.
 - Trustworthiness: give balanced advice — say when an idea won't work well (e.g. "avoid this in small, dark rooms" / "this works best with good natural light"). Never make unverifiable claims.
 
-STEP 5 — FORMATTING OUTPUT
+STEP 5 — FORMATTING OUTPUT & STRICT STOP RULE
 - Output clean HTML: h1 for the title, h2 for each section heading, h3 only if a section needs a genuine sub-point, p for paragraphs.
 - Bold key terms sparingly for scannability (use <strong>, never bold inside headings).
 - FAQ section: h2 "Frequently Asked Questions," then each question as h3 starting with "Q:" and the answer as a p starting with "A:".
 - No markdown, no code fences, no text outside the HTML.
-
-Before finishing, verify: word count is 1000-1200, there are exactly 8 H2 sections, exactly 8 [image space] placeholders exist (one per section, none elsewhere), headings are research-driven, and at least one first-hand-sounding line appears per section."""
+- CRITICAL: Return ONLY raw HTML starting with <h1> and ending with the final HTML tag (such as </p>). Do NOT output any verification notes, checklists, scratchpad thoughts, or word count commentary anywhere in your output."""
 
 
 def _generate_fallback_article(title: str) -> str:
@@ -142,6 +141,17 @@ async def generate_article(title: str) -> str:
             html_match = re.search(r"<(?:h1|h2)[\s\S]*", cleaned, re.IGNORECASE)
             if html_match:
                 cleaned = html_match.group(0).strip()
+                # Strip trailing LLM verification / scratchpad text after final HTML closing tag
+                last_tag_idx = max(
+                    cleaned.rfind("</p>"),
+                    cleaned.rfind("</div>"),
+                    cleaned.rfind("</html>"),
+                    cleaned.rfind("</figure>"),
+                )
+                if last_tag_idx != -1:
+                    tag_end = cleaned.find(">", last_tag_idx)
+                    if tag_end != -1:
+                        cleaned = cleaned[: tag_end + 1].strip()
 
             if "<h2" in cleaned and "[image space]" in cleaned:
                 logger.info("Successfully generated article via LLM for title '%s'", title)

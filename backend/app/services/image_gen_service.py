@@ -28,7 +28,7 @@ async def _generate_one_image(client: httpx.AsyncClient, prompt: str) -> bytes:
             "Content-Type": "application/json",
         },
         json={"prompt": prompt},
-        timeout=settings.request_timeout_seconds,
+        timeout=12.0,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -36,47 +36,32 @@ async def _generate_one_image(client: httpx.AsyncClient, prompt: str) -> bytes:
     return base64.b64decode(b64_image)
 
 
-async def _generate_from_pollinations(client: httpx.AsyncClient, prompt: str, seed_index: int = 1) -> bytes:
-    import urllib.parse
-    import random
-    clean_p = prompt.strip()
-    encoded = urllib.parse.quote(clean_p)
-    seed = random.randint(10000, 99999) + seed_index
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1000&height=700&nologo=true&seed={seed}"
-    resp = await client.get(url, timeout=30.0)
-    resp.raise_for_status()
-    if resp.headers.get("content-type", "").startswith("image/") or len(resp.content) > 1000:
-        return resp.content
-    raise RuntimeError("Pollinations AI returned invalid image content")
-
-
 async def generate_images(prompts: list[str]) -> list[bytes]:
     """
-    Generates AI images concurrently in parallel for maximum speed.
-    Tries Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell) first.
-    If daily free neuron allocation (429 quota) is exceeded, seamlessly uses Pollinations AI.
-    Guaranteed to always return real high-quality AI-generated image bytes.
+    Generates AI images using Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell).
+    Batches execution in chunks of 4 images to stay safely within serverless timeout budgets.
+    Zero external fallbacks to Pollinations AI.
     """
-    async with httpx.AsyncClient(timeout=45.0) as client:
+    from app.services.cloudinary_service import _create_procedural_ai_asset
+
+    images: list[bytes] = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
 
         async def _safe_gen(idx: int, prompt: str) -> bytes:
             try:
-                return await _generate_one_image(client, prompt)
+                if settings.cloudflare_api_token and settings.cloudflare_account_id:
+                    return await _generate_one_image(client, prompt)
             except Exception as cf_err:
-                logger.warning("Cloudflare Workers AI image generation failed/quota exceeded (%s). Switching to Pollinations AI fallback...", cf_err)
-                try:
-                    return await _generate_from_pollinations(client, prompt, seed_index=idx)
-                except Exception as pol_err:
-                    logger.error("Pollinations AI image generation failed: %s", pol_err)
-                    # Retry Pollinations with clean luxury interior prompt
-                    clean_prompt = "Professional high-end luxury residential interior architecture photograph, Architectural Digest style, 35mm lens, 8k detail, 1000x700 resolution"
-                    try:
-                        return await _generate_from_pollinations(client, clean_prompt, seed_index=idx)
-                    except Exception as last_err:
-                        logger.error("All AI image generation providers failed: %s", last_err)
-                        from app.services.cloudinary_service import _create_procedural_ai_asset
-                        return _create_procedural_ai_asset("Luxury Interior", idx)
+                logger.warning("Cloudflare Workers AI image generation failed for prompt %d: %s", idx, cf_err)
+            
+            return _create_procedural_ai_asset("Luxury Interior", idx)
 
-        tasks = [_safe_gen(idx, p) for idx, p in enumerate(prompts, start=1)]
-        images = await asyncio.gather(*tasks)
-        return list(images)
+        # Batch into sub-groups of 4 images to keep execution fast and prevent timeouts
+        batch_size = 4
+        for batch_start in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[batch_start:batch_start + batch_size]
+            tasks = [_safe_gen(batch_start + idx + 1, p) for idx, p in enumerate(batch_prompts)]
+            batch_results = await asyncio.gather(*tasks)
+            images.extend(batch_results)
+
+    return images
