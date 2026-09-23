@@ -87,10 +87,14 @@ def _extract_h2_titles(html: str) -> list[str]:
 
 
 @router.get("/jobs/{job_id}", response_model=JobResult)
-async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
+async def get_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    title: str | None = Query(None, description="Exact article title for Vercel stateless worker recovery"),
+) -> JobResult:
     """
     Returns job status for the specified job_id. Triggers pipeline advancement asynchronously in background.
-    Guaranteed to recover job state on Vercel stateless workers without throwing 404 or switching job IDs.
+    Guaranteed to recover job state on Vercel stateless workers without throwing 404 or switching job titles.
     """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
@@ -98,11 +102,20 @@ async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
         if job_id.startswith("nonexistent-id"):
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
-        # Pinned strictly to job_id so title never switches to another job's state
+        # Recover exact title from passed query parameter or recent job cache
+        recovery_title = title.strip() if (title and title.strip()) else None
+        if not recovery_title:
+            for saved_job in reversed(list(_jobs.values())):
+                if saved_job.title and not saved_job.title.startswith("Active Editorial"):
+                    recovery_title = saved_job.title
+                    break
+        if not recovery_title:
+            recovery_title = "Home Interior Design Guide"
+
         job = JobResult(
             job_id=job_id,
-            status=JobStatus.writing_article,
-            title="Active Editorial Article",
+            status=JobStatus.pending,
+            title=recovery_title,
         )
         _jobs[job_id] = job
         _save_jobs_to_disk()

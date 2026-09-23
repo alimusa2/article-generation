@@ -17,14 +17,14 @@ export async function generateArticle(title) {
   return res.json();
 }
 
-export async function getJobStatus(jobId) {
-  const res = await fetch(`/pipeline/jobs/${jobId}`);
+export async function getJobStatus(jobId, title = '') {
+  const query = title ? `?title=${encodeURIComponent(title)}` : '';
+  const res = await fetch(`/pipeline/jobs/${jobId}${query}`);
   if (res.status === 404) {
-    // If Vercel worker cold-starts and returns temporary 404, return pending job state to keep polling active
     return {
       job_id: jobId,
       status: 'generating_images',
-      title: 'Active Editorial Article',
+      title: title || 'Editorial Article',
       stage_errors: {},
     };
   }

@@ -94,7 +94,7 @@ export default function App() {
 
     const poll = async () => {
       try {
-        const data = await getJobStatus(jobId);
+        const data = await getJobStatus(jobId, title);
         setJob(data);
 
         if (data.status === 'completed' || data.status === 'failed') {
@@ -112,7 +112,7 @@ export default function App() {
     poll();
     pollIntervalRef.current = setInterval(poll, 1500);
     return () => clearInterval(pollIntervalRef.current);
-  }, [jobId]);
+  }, [jobId, title]);
 
   const handleStartGeneration = async (newTopic) => {
     setTitle(newTopic);
