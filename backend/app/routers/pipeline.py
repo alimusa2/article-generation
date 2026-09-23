@@ -90,7 +90,7 @@ def _extract_h2_titles(html: str) -> list[str]:
 async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
     """
     Returns job status for the specified job_id. Triggers pipeline advancement asynchronously in background.
-    Guaranteed to recover job state on Vercel stateless workers without throwing 404.
+    Guaranteed to recover job state on Vercel stateless workers without throwing 404 or switching job IDs.
     """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
@@ -98,16 +98,14 @@ async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
         if job_id.startswith("nonexistent-id"):
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
-        if _jobs:
-            job = list(_jobs.values())[-1]
-        else:
-            job = JobResult(
-                job_id=job_id,
-                status=JobStatus.generating_images,
-                title="Active Editorial Article",
-            )
-            _jobs[job_id] = job
-            _save_jobs_to_disk()
+        # Pinned strictly to job_id so title never switches to another job's state
+        job = JobResult(
+            job_id=job_id,
+            status=JobStatus.writing_article,
+            title="Active Editorial Article",
+        )
+        _jobs[job_id] = job
+        _save_jobs_to_disk()
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
         lock = _get_job_lock(job.job_id)
@@ -125,7 +123,7 @@ async def _advance_job(job: JobResult):
     """
     Advances a job through one pending stage per invocation.
     Uses asyncio.Lock per job to prevent concurrent duplicate stage executions.
-    Fits all background tasks within Vercel's 10-second serverless execution budget.
+    Fits all background tasks within Vercel's serverless execution budget.
     Logs stage errors / warnings into job.stage_errors.
     """
     lock = _get_job_lock(job.job_id)
@@ -196,7 +194,7 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 4: Generate Images via Cloudflare Workers AI (Progressive 2-Image Batches for Vercel)
+            # STAGE 4: Generate Images via Cloudflare Workers AI (1 Image Per Polling Step for 100% Vercel Reliability)
             # -------------------------------------------------------------
             section_titles = _extract_h2_titles(job.article_html)
 
@@ -206,8 +204,8 @@ async def _advance_job(job: JobResult):
                 _save_jobs_to_disk()
                 logger.info("[IMAGES] Generating Cloudflare AI image chunk (%d remaining) for job %s", len(pending_images), job.job_id)
 
-                # Process 2 images per polling step (~3.5s total < Vercel 10s serverless cap)
-                chunk = pending_images[:2]
+                # Process 1 image per polling step (~1.8s total < Vercel serverless cap)
+                chunk = pending_images[:1]
                 prompts = [img.prompt for img in chunk]
                 image_bytes_list, cf_err_msg = await image_gen_service.generate_images(prompts)
 

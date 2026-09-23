@@ -28,7 +28,7 @@ async def _generate_one_image_from_account(
             "User-Agent": "Mozilla/5.0",
         },
         json={"prompt": prompt},
-        timeout=12.0,
+        timeout=6.0,
     )
     resp.raise_for_status()
     raw_content = resp.content
