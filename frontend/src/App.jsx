@@ -95,6 +95,9 @@ export default function App() {
     const poll = async () => {
       try {
         const data = await getJobStatus(jobId, title);
+        if (data && title) {
+          data.title = title;
+        }
         setJob(data);
 
         if (data.status === 'completed' || data.status === 'failed') {

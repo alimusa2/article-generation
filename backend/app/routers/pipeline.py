@@ -102,15 +102,8 @@ async def get_job(
         if job_id.startswith("nonexistent-id"):
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
-        # Recover exact title from passed query parameter or recent job cache
-        recovery_title = title.strip() if (title and title.strip()) else None
-        if not recovery_title:
-            for saved_job in reversed(list(_jobs.values())):
-                if saved_job.title and not saved_job.title.startswith("Active Editorial"):
-                    recovery_title = saved_job.title
-                    break
-        if not recovery_title:
-            recovery_title = "Home Interior Design Guide"
+        # Recover exact title strictly from passed query parameter
+        recovery_title = title.strip() if (title and title.strip()) else "Home Interior Design Guide"
 
         job = JobResult(
             job_id=job_id,
