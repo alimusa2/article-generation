@@ -57,6 +57,9 @@ STEP 5 — FORMATTING OUTPUT & STRICT STOP RULE
 def _generate_fallback_article(title: str) -> str:
     """Generates a high-quality, dynamic fallback HTML article based on the user's requested topic/title."""
     clean_title = title.strip()
+    if not clean_title or clean_title.lower().startswith("active editorial"):
+        clean_title = "Modern Home Decor & Interior Styling Guide"
+
     words = [
         w for w in clean_title.split()
         if len(w) > 2 and w.lower() not in ("the", "and", "for", "with", "your", "ideas", "best", "top", "how", "ways", "tips")
@@ -123,6 +126,9 @@ def _generate_fallback_article(title: str) -> str:
 
 async def generate_article(title: str) -> str:
     """Calls OpenRouter/Gemini LLM pipeline to generate raw HTML article, with fallback on error."""
+    if not title or title.lower().startswith("active editorial"):
+        title = "Modern Home Decor & Interior Styling Guide"
+
     system_prompt = ARTICLE_SYSTEM_PROMPT
     user_prompt = (
         f"Write the complete article now, following all system rules exactly, "

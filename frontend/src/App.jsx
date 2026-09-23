@@ -124,8 +124,8 @@ export default function App() {
     setShowRunModal(false);
     setIsPublished(false);
     setCustomHeroUrl(null);
-    // Instantly reset job to Stage 1 Active so stepper resets visual state before API returns
-    setJob({ status: 'writing_article', title: newTopic });
+    // Instantly reset job to Stage 1 Active with clean state so stepper and document reset visually
+    setJob({ status: 'writing_article', title: newTopic, article_html: null, formatted_content: null, images: [], seo: null });
 
     try {
       const data = await generateArticle(newTopic);

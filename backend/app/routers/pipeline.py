@@ -103,7 +103,9 @@ async def get_job(
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
         # Recover exact title strictly from passed query parameter
-        recovery_title = title.strip() if (title and title.strip()) else "Home Interior Design Guide"
+        recovery_title = title.strip() if (title and title.strip()) else "Modern Home Decor & Interior Styling Guide"
+        if recovery_title.lower().startswith("active editorial"):
+            recovery_title = "Modern Home Decor & Interior Styling Guide"
 
         job = JobResult(
             job_id=job_id,
