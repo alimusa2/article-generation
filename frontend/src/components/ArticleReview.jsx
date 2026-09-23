@@ -47,6 +47,24 @@ export default function ArticleReview({
                 __html: job.formatted_content || job.article_html,
               }}
             />
+          ) : job ? (
+            <article className="article-generating-state">
+              <h1 className="article-headline">{title}</h1>
+              <div style={{
+                padding: '24px',
+                backgroundColor: '#f8fafc',
+                border: '1px border-dashed #cbd5e1',
+                borderRadius: '8px',
+                margin: '20px 0',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <span className="status-dot-pulsing" style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#3b82f6', borderRadius: '50%' }} />
+                <span>Writing long-form article content for <strong>"{title}"</strong>...</span>
+              </div>
+            </article>
           ) : (
             <article>
               <h1 className="article-headline">{title}</h1>

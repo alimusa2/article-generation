@@ -89,18 +89,13 @@ def _extract_h2_titles(html: str) -> list[str]:
 @router.get("/jobs/{job_id}", response_model=JobResult)
 async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
     """
-    Returns job status in < 5ms. Triggers pipeline advancement asynchronously in background.
-    Guaranteed to recover job state on Vercel stateless workers without throwing 404.
+    Returns job status for the specified job_id. Triggers pipeline advancement asynchronously in background.
+    Recovers job state from multi-path disk cache for Vercel stateless workers. Returns 404 if job_id is not found.
     """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
     if not job:
-        if _jobs:
-            job = list(_jobs.values())[-1]
-        else:
-            job = JobResult(job_id=job_id, status=JobStatus.pending, title="Rustic Stone Fireplace Inspiration for 2026")
-            _jobs[job_id] = job
-            _save_jobs_to_disk()
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
         lock = _get_job_lock(job.job_id)
@@ -119,6 +114,7 @@ async def _advance_job(job: JobResult):
     Advances a job through one pending stage per invocation.
     Uses asyncio.Lock per job to prevent concurrent duplicate stage executions.
     Fits all background tasks within Vercel's 10-second serverless execution budget.
+    Logs stage errors / warnings into job.stage_errors.
     """
     lock = _get_job_lock(job.job_id)
     if lock.locked():
@@ -201,7 +197,10 @@ async def _advance_job(job: JobResult):
                 # Process 2 images per polling step (~3.5s total < Vercel 10s serverless cap)
                 chunk = pending_images[:2]
                 prompts = [img.prompt for img in chunk]
-                image_bytes_list = await image_gen_service.generate_images(prompts)
+                image_bytes_list, cf_err_msg = await image_gen_service.generate_images(prompts)
+
+                if cf_err_msg:
+                    job.stage_errors["generating_images"] = cf_err_msg
 
                 async def _upload_one(img: GeneratedImage, img_bytes: bytes):
                     idx = img.image_index
@@ -217,6 +216,7 @@ async def _advance_job(job: JobResult):
                         ai_url = cloudinary_service.convert_bytes_to_avif_data_url(img_bytes, title=h2_title, fallback_index=idx)
                         img.cloudinary_url = ai_url
                         img.avif_url = ai_url
+                        job.stage_errors["uploading_images"] = f"Cloudinary upload fallback used: {c_err}"
 
                 upload_tasks = [
                     _upload_one(img, img_bytes)
@@ -291,6 +291,7 @@ async def _advance_job(job: JobResult):
                         job.wordpress_post_link = _enforce_https(raw_link)
                     except Exception as wp_post_err:
                         logger.warning("WordPress post creation failed: %s", wp_post_err)
+                        job.stage_errors["publishing_wordpress"] = f"WordPress post creation warning: {wp_post_err}"
                         job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
                 else:
                     job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
@@ -306,6 +307,9 @@ async def _advance_job(job: JobResult):
                 job.status = JobStatus.publishing_pinterest
                 _save_jobs_to_disk()
                 logger.info("[PINTEREST] Started Stage 8 (Generating 8 Pins) for job %s", job.job_id)
+
+                if not settings.pinterest_access_token:
+                    job.stage_errors["publishing_pinterest"] = "PINTEREST_ACCESS_TOKEN is empty in environment variables. Created 8 prepared Pinterest pin drafts."
 
                 wp_link = job.wordpress_post_link or f"{settings.wordpress_base_url.rstrip('/')}/{job.title.lower().replace(' ', '-')}"
                 raw_seo_dict = job.seo.model_dump() if job.seo else {"meta_description": ""}
@@ -332,6 +336,7 @@ async def _advance_job(job: JobResult):
             job.status = JobStatus.failed
             job.error = str(e)
             job.error_stage = failed_stage
+            job.stage_errors[str(failed_stage)] = f"Stage execution failed: {e}"
             logger.exception("Pipeline failed for job %s at stage %s: %s", job.job_id, failed_stage, e)
             _save_jobs_to_disk()
             return
@@ -366,28 +371,7 @@ async def run_pipeline(
     return _jobs[job_id]
 
 
-@router.get("/jobs/{job_id}", response_model=JobResult)
-async def get_job(job_id: str, background_tasks: BackgroundTasks) -> JobResult:
-    """
-    Returns job status in < 5ms. Triggers pipeline advancement asynchronously in background.
-    Guaranteed to recover job state on Vercel stateless workers without throwing 404.
-    """
-    _load_jobs_from_disk()
-    job = _jobs.get(job_id)
-    if not job:
-        if _jobs:
-            job = list(_jobs.values())[-1]
-        else:
-            job = JobResult(job_id=job_id, status=JobStatus.pending, title="Rustic Stone Fireplace Inspiration for 2026")
-            _jobs[job_id] = job
-            _save_jobs_to_disk()
 
-    if job.status not in (JobStatus.completed, JobStatus.failed):
-        lock = _get_job_lock(job.job_id)
-        if not lock.locked():
-            background_tasks.add_task(_execute_pipeline, job)
-
-    return job
 
 
 @router.get("/jobs", response_model=list[JobResult])

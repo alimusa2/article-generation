@@ -162,8 +162,20 @@ export default function Stepper({ job, loading, elapsedSeconds = 0 }) {
           <div className="progress-banner-footer">
             <span className="progress-description-text">{activeDescription}</span>
           </div>
+
+          {job?.stage_errors && Object.keys(job.stage_errors).length > 0 && (
+            <div style={{ marginTop: '10px', padding: '8px 12px', backgroundColor: '#fffbe6', border: '1px solid #ffe58f', borderRadius: '4px', fontSize: '0.8rem', color: '#d48806' }}>
+              <strong>Stage Warnings / Notices:</strong>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                {Object.entries(job.stage_errors).map(([st, err]) => (
+                  <li key={st}><strong>{st}:</strong> {err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </section>
   );
 }
+

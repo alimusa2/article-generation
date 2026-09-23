@@ -56,4 +56,5 @@ class JobResult(BaseModel):
     feedback: list[dict] = []
     error: str | None = None
     error_stage: JobStatus | None = None
+    stage_errors: dict[str, str] = Field(default_factory=dict)
 

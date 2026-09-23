@@ -38,6 +38,13 @@ def test_pipeline_generate_and_get_job():
         assert any(j["job_id"] == job_id for j in jobs)
 
 
+def test_get_nonexistent_job_returns_404():
+    resp = client.get("/pipeline/jobs/nonexistent-id-12345")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Job 'nonexistent-id-12345' not found"
+
+
+
 def test_update_job_seo():
     with patch("app.routers.pipeline._execute_pipeline", new_callable=AsyncMock):
         create_resp = client.post("/pipeline/generate", json={"title": "Modern Fireplace Design"})

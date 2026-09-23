@@ -20,15 +20,6 @@ export async function generateArticle(title) {
 export async function getJobStatus(jobId) {
   const res = await fetch(`/pipeline/jobs/${jobId}`);
   if (!res.ok) {
-    if (res.status === 404) {
-      const jobsRes = await fetch('/pipeline/jobs');
-      if (jobsRes.ok) {
-        const jobs = await jobsRes.json();
-        if (jobs && jobs.length > 0) {
-          return jobs[jobs.length - 1];
-        }
-      }
-    }
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to fetch job status');
   }
