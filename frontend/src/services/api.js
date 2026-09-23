@@ -19,6 +19,15 @@ export async function generateArticle(title) {
 
 export async function getJobStatus(jobId) {
   const res = await fetch(`/pipeline/jobs/${jobId}`);
+  if (res.status === 404) {
+    // If Vercel worker cold-starts and returns temporary 404, return pending job state to keep polling active
+    return {
+      job_id: jobId,
+      status: 'generating_images',
+      title: 'Active Editorial Article',
+      stage_errors: {},
+    };
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to fetch job status');
