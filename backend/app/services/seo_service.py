@@ -169,6 +169,8 @@ def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:
     import re, json
     h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", article_html, re.IGNORECASE | re.DOTALL)
     title_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip() if h1_match else "Home Interior Decor Guide"
+    if not title_text or title_text.lower().startswith("active editorial"):
+        title_text = "Modern Home Decor & Interior Styling Guide"
     raw_slug = re.sub(r"[^\w\s-]", "", title_text.lower()).strip().replace(" ", "-")
     slug = re.sub(r"-+", "-", raw_slug)[:70].strip("-")
 
