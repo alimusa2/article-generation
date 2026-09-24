@@ -192,6 +192,9 @@ def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:
 
 
 async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:
+    if not article_html or not article_html.strip():
+        raise ValueError("Article HTML content is required for SEO metadata generation.")
+
     user_prompt = (
         "# Article SEO Metadata Request\n\n"
         "Generate SEO metadata for the following article.\n\n"
@@ -212,8 +215,10 @@ async def generate_seo_metadata(article_html: str) -> tuple[SeoMetadata, str]:
         )
         if seo.seo_title and seo.meta_description:
             return seo, raw
+        else:
+            raise RuntimeError("Extracted SEO metadata was missing required 'seo_title' or 'meta_description' fields.")
     except Exception as err:
-        logger.warning("generate_seo_metadata LLM failed: %s. Using structured fallback SEO metadata.", err)
+        logger.error("SEO metadata generation stage failed: %s", err)
+        raise RuntimeError(f"SEO metadata generation stage failed: {err}")
 
-    return _generate_fallback_seo(article_html)
 

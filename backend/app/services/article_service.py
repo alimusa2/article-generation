@@ -125,14 +125,15 @@ def _generate_fallback_article(title: str) -> str:
 
 
 async def generate_article(title: str) -> str:
-    """Calls OpenRouter/Gemini LLM pipeline to generate raw HTML article, with fallback on error."""
-    if not title or title.lower().startswith("active editorial"):
-        title = "Modern Home Decor & Interior Styling Guide"
+    """Calls OpenRouter/Gemini LLM pipeline to generate raw HTML article."""
+    clean_title = title.strip() if title else ""
+    if not clean_title:
+        raise ValueError("Article title cannot be empty.")
 
     system_prompt = ARTICLE_SYSTEM_PROMPT
     user_prompt = (
         f"Write the complete article now, following all system rules exactly, "
-        f"for this title/keyword:\n{title}\n\n"
+        f"for this title/keyword:\n{clean_title}\n\n"
         f"The article must have exactly {settings.h2_sections_per_article} H2 sections "
         f"and exactly {settings.images_per_article} [image space] placeholders. "
         f"Return only the final HTML article."
@@ -160,12 +161,13 @@ async def generate_article(title: str) -> str:
                         cleaned = cleaned[: tag_end + 1].strip()
 
             if "<h2" in cleaned and "[image space]" in cleaned:
-                logger.info("Successfully generated article via LLM for title '%s'", title)
+                logger.info("Successfully generated article via LLM for title '%s'", clean_title)
                 return cleaned
             else:
-                logger.warning("LLM response did not meet section formatting rules. Using structured fallback.")
-                return _generate_fallback_article(title)
+                raise RuntimeError(
+                    f"LLM article generation for '{clean_title}' did not produce required '<h2>' headings or '[image space]' placeholders."
+                )
     except Exception as err:
-        logger.warning("LLM call failed for generate_article: %s. Using structured fallback article.", err)
+        logger.error("Article generation stage failed for '%s': %s", clean_title, err)
+        raise RuntimeError(f"Article generation stage failed: {err}")
 
-    return _generate_fallback_article(title)

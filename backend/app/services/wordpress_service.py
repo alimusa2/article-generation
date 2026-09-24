@@ -25,6 +25,9 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
     Downloads or decodes the AVIF image and re-uploads it to WP media.
     Returns the media item dict including 'id' and 'url'.
     """
+    if not avif_url:
+        raise ValueError("Cannot upload to WordPress: empty AVIF image URL provided.")
+
     if avif_url.startswith("data:"):
         _, encoded = avif_url.split(",", 1)
         img_content = base64.b64decode(encoded)
@@ -33,6 +36,9 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
             img_resp = await client.get(avif_url)
             img_resp.raise_for_status()
             img_content = img_resp.content
+
+    if not img_content or len(img_content) < 100:
+        raise ValueError(f"Downloaded AVIF image payload for WordPress upload was empty or corrupted ({len(img_content)} bytes).")
 
     slug = "image"
     if h2_title:
@@ -55,14 +61,17 @@ async def upload_media_from_url(avif_url: str, h2_title: str = "") -> dict:
         upload_resp.raise_for_status()
         data = upload_resp.json()
         media_id = data.get("id", 0)
-        # guid.rendered || source_url || url (matching n8n Code in JavaScript2)
         media_url = (
             (data.get("guid", {}) or {}).get("rendered")
             or data.get("source_url")
             or data.get("url")
             or ""
         )
+        if not media_id or not media_url:
+            raise RuntimeError(f"WordPress media upload response was missing media 'id' or 'url'. Raw: {data}")
+
         return {"id": media_id, "url": media_url, "raw": data}
+
 
 
 def replace_image_placeholders(article_html: str, media_urls: list[str]) -> str:

@@ -93,8 +93,8 @@ async def get_job(
     title: str | None = Query(None, description="Exact article title for Vercel stateless worker recovery"),
 ) -> JobResult:
     """
-    Returns job status for the specified job_id. Triggers pipeline advancement asynchronously in background.
-    Guaranteed to recover job state on Vercel stateless workers without throwing 404 or switching job titles.
+    Returns job status for the specified job_id and synchronously advances pending stage.
+    Guaranteed to execute reliably on Vercel Serverless without background container freezes.
     """
     _load_jobs_from_disk()
     job = _jobs.get(job_id)
@@ -102,10 +102,9 @@ async def get_job(
         if job_id.startswith("nonexistent-id"):
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
-        # Recover exact title strictly from passed query parameter
-        recovery_title = title.strip() if (title and title.strip()) else "Modern Home Decor & Interior Styling Guide"
-        if recovery_title.lower().startswith("active editorial"):
-            recovery_title = "Modern Home Decor & Interior Styling Guide"
+        recovery_title = title.strip() if (title and title.strip()) else ""
+        if not recovery_title:
+            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
         job = JobResult(
             job_id=job_id,
@@ -116,9 +115,7 @@ async def get_job(
         _save_jobs_to_disk()
 
     if job.status not in (JobStatus.completed, JobStatus.failed):
-        lock = _get_job_lock(job.job_id)
-        if not lock.locked():
-            background_tasks.add_task(_execute_pipeline, job)
+        await _execute_pipeline(job)
 
     return job
 
@@ -131,12 +128,11 @@ async def _advance_job(job: JobResult):
     """
     Advances a job through one pending stage per invocation.
     Uses asyncio.Lock per job to prevent concurrent duplicate stage executions.
-    Fits all background tasks within Vercel's serverless execution budget.
-    Logs stage errors / warnings into job.stage_errors.
+    Fits all execution chunks cleanly within Vercel's serverless timeout budget.
+    Logs stage errors / warnings into job.stage_errors and reports real failures.
     """
     lock = _get_job_lock(job.job_id)
     if lock.locked():
-        # Another background task is actively running a stage for this job, return safely
         return
 
     async with lock:
@@ -145,7 +141,7 @@ async def _advance_job(job: JobResult):
 
         try:
             # -------------------------------------------------------------
-            # STAGE 1: Write Article
+            # STAGE 1: Write Article via Gemini / OpenRouter LLM
             # -------------------------------------------------------------
             if not job.article_html:
                 job.status = JobStatus.writing_article
@@ -202,7 +198,7 @@ async def _advance_job(job: JobResult):
                 return
 
             # -------------------------------------------------------------
-            # STAGE 4: Generate Images via Cloudflare Workers AI (1 Image Per Polling Step for 100% Vercel Reliability)
+            # STAGE 4: Generate Images via Cloudflare Workers AI (1 Image Per Step for 100% Vercel Reliability)
             # -------------------------------------------------------------
             section_titles = _extract_h2_titles(job.article_html)
 
@@ -212,29 +208,21 @@ async def _advance_job(job: JobResult):
                 _save_jobs_to_disk()
                 logger.info("[IMAGES] Generating Cloudflare AI image chunk (%d remaining) for job %s", len(pending_images), job.job_id)
 
-                # Process 1 image per polling step (~1.8s total < Vercel serverless cap)
                 chunk = pending_images[:1]
                 prompts = [img.prompt for img in chunk]
-                image_bytes_list, cf_err_msg = await image_gen_service.generate_images(prompts)
+                image_bytes_list, cf_notice = await image_gen_service.generate_images(prompts)
 
-                if cf_err_msg:
-                    job.stage_errors["generating_images"] = cf_err_msg
+                if cf_notice:
+                    job.stage_errors["generating_images"] = cf_notice
 
                 async def _upload_one(img: GeneratedImage, img_bytes: bytes):
                     idx = img.image_index
                     h2_title = section_titles[idx - 1] if idx - 1 < len(section_titles) else job.title
-                    try:
-                        c_res = await cloudinary_service.upload_image(
-                            img_bytes, job.title, idx, h2_title=h2_title
-                        )
-                        img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
-                        img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
-                    except Exception as c_err:
-                        logger.warning("Cloudinary upload failed for image %d: %s", idx, c_err)
-                        ai_url = cloudinary_service.convert_bytes_to_avif_data_url(img_bytes, title=h2_title, fallback_index=idx)
-                        img.cloudinary_url = ai_url
-                        img.avif_url = ai_url
-                        job.stage_errors["uploading_images"] = f"Cloudinary upload fallback used: {c_err}"
+                    c_res = await cloudinary_service.upload_image(
+                        img_bytes, job.title, idx, h2_title=h2_title
+                    )
+                    img.cloudinary_url = _enforce_https(c_res.get("secure_url") or c_res.get("url", ""))
+                    img.avif_url = _enforce_https(c_res.get("avif_url") or img.cloudinary_url)
 
                 upload_tasks = [
                     _upload_one(img, img_bytes)
@@ -263,21 +251,19 @@ async def _advance_job(job: JobResult):
                     if not img.wordpress_media_url:
                         h2_title = section_titles[img.image_index - 1] if img.image_index - 1 < len(section_titles) else job.title
                         if settings.wordpress_username and settings.wordpress_app_password:
-                            try:
-                                wp_media = await wordpress_service.upload_media_from_url(img.avif_url or img.cloudinary_url, h2_title=h2_title)
-                                img.wordpress_media_id = wp_media.get("id", 0)
-                                raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
-                                img.wordpress_media_url = _enforce_https(raw_wp_url)
-                            except Exception as wp_media_err:
-                                logger.warning("WordPress media upload failed for image %d: %s", img.image_index, wp_media_err)
-                                img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
+                            wp_media = await wordpress_service.upload_media_from_url(
+                                img.avif_url or img.cloudinary_url, h2_title=h2_title
+                            )
+                            img.wordpress_media_id = wp_media.get("id", 0)
+                            raw_wp_url = wp_media.get("url") or img.avif_url or img.cloudinary_url
+                            img.wordpress_media_url = _enforce_https(raw_wp_url)
                         else:
                             img.wordpress_media_url = _enforce_https(img.avif_url or img.cloudinary_url)
 
                 wp_tasks = [_wp_upload_one(img) for img in job.images]
                 await asyncio.gather(*wp_tasks)
 
-                # Replace placeholders in article HTML with real WordPress media URLs
+                # Replace placeholders in article HTML with real verified WordPress media URLs
                 media_urls = [img.wordpress_media_url for img in job.images]
                 job.formatted_content = wordpress_service.replace_image_placeholders(job.article_html, media_urls)
                 job.status = JobStatus.publishing_wordpress
@@ -297,20 +283,15 @@ async def _advance_job(job: JobResult):
                 featured_media_id = job.images[0].wordpress_media_id if (job.images and job.images[0].wordpress_media_id) else 0
 
                 if settings.wordpress_username and settings.wordpress_app_password:
-                    try:
-                        post = await wordpress_service.create_post(
-                            title=job.title,
-                            content_html=job.formatted_content or job.article_html,
-                            featured_media_id=featured_media_id,
-                            seo=job.seo or SeoMetadata(seo_title=job.title, meta_description="", url_slug="", focus_keyphrase="", secondary_keywords=[]),
-                        )
-                        job.wordpress_post_id = post.get("id")
-                        raw_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
-                        job.wordpress_post_link = _enforce_https(raw_link)
-                    except Exception as wp_post_err:
-                        logger.warning("WordPress post creation failed: %s", wp_post_err)
-                        job.stage_errors["publishing_wordpress"] = f"WordPress post creation warning: {wp_post_err}"
-                        job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
+                    post = await wordpress_service.create_post(
+                        title=job.title,
+                        content_html=job.formatted_content or job.article_html,
+                        featured_media_id=featured_media_id,
+                        seo=job.seo or SeoMetadata(seo_title=job.title, meta_description="", url_slug="", focus_keyphrase="", secondary_keywords=[]),
+                    )
+                    job.wordpress_post_id = post.get("id")
+                    raw_link = post.get("link") or f"{wp_base}/{job.title.lower().replace(' ', '-')}"
+                    job.wordpress_post_link = _enforce_https(raw_link)
                 else:
                     job.wordpress_post_link = _enforce_https(f"{wp_base}/{job.title.lower().replace(' ', '-')}")
 
@@ -327,7 +308,7 @@ async def _advance_job(job: JobResult):
                 logger.info("[PINTEREST] Started Stage 8 (Generating 8 Pins) for job %s", job.job_id)
 
                 if not settings.pinterest_access_token:
-                    job.stage_errors["publishing_pinterest"] = "PINTEREST_ACCESS_TOKEN is empty in environment variables. Created 8 prepared Pinterest pin drafts."
+                    job.stage_errors["publishing_pinterest"] = "PINTEREST_ACCESS_TOKEN is empty in production environment variables. Created 8 prepared Pinterest pin drafts."
 
                 wp_link = job.wordpress_post_link or f"{settings.wordpress_base_url.rstrip('/')}/{job.title.lower().replace(' ', '-')}"
                 raw_seo_dict = job.seo.model_dump() if job.seo else {"meta_description": ""}
@@ -371,20 +352,16 @@ async def run_pipeline(
     sync: bool = Query(False, description="Run synchronously instead of in background"),
 ) -> JobResult:
     """
-    Executes article generation pipeline and returns job object.
+    Executes article generation pipeline initial stage synchronously and returns created job object.
     Completes initial article stage in sub-2s for instant response.
     """
     _load_jobs_from_disk()
     job_id = str(uuid.uuid4())
-    job = JobResult(job_id=job_id, status=JobStatus.pending, title=req.title)
+    job = JobResult(job_id=job_id, status=JobStatus.pending, title=req.title.strip())
     _jobs[job_id] = job
     _save_jobs_to_disk()
 
-    # Advance initial stage synchronously for sub-2s response
     await _execute_pipeline(job)
-
-    if not sync and job.status not in (JobStatus.completed, JobStatus.failed):
-        background_tasks.add_task(_execute_pipeline, job)
 
     return _jobs[job_id]
 

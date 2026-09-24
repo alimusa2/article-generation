@@ -72,7 +72,12 @@ async def test_pipeline_deduplication_stage():
     from unittest.mock import patch, AsyncMock
     sample_bytes = [b"fake_image_bytes_" + str(i).encode() for i in range(1, 9)]
     with patch("app.services.image_gen_service.generate_images", new_callable=AsyncMock) as mock_gen:
-        mock_gen.side_effect = lambda prompts: [b"fake_image_bytes_" + p.encode() for p in prompts]
+        # Create valid image bytes (>100 bytes) for test conversion
+        img_sample = Image.new("RGB", (100, 100), color=(100, 200, 50))
+        out_buf = io.BytesIO()
+        img_sample.save(out_buf, format="JPEG")
+        sample_jpg = out_buf.getvalue()
+        mock_gen.side_effect = lambda prompts: ([sample_jpg for _ in prompts], None)
         # Loop _advance_job until all 8 images are generated across chunks
         while any(not img.cloudinary_url for img in job.images):
             await _advance_job(job)

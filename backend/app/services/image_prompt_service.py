@@ -97,23 +97,31 @@ def _generate_fallback_image_prompts(title: str, article_html: str) -> list[str]
 
 
 async def generate_image_prompts(title: str, article_html: str) -> list[str]:
+    clean_title = title.strip() if title else ""
+    if not clean_title or not article_html:
+        raise ValueError("Article title and HTML content are required for image prompt generation.")
+
     sections = _extract_h2_sections(article_html)
     sections_formatted = "\n\n".join(sections) if sections else article_html
 
     user_prompt = (
         f"Generate exactly {settings.images_per_article} image prompts for this blog article.\n"
-        f"ARTICLE TITLE: {title}\n\n"
+        f"ARTICLE TITLE: {clean_title}\n\n"
         f"THE 8 H2 SECTIONS:\n{sections_formatted}\n\n"
-        f"Remember: Output ONLY a JSON array of 8 strings, matching each section in 1:1 order."
+        f"Remember: Output ONLY a JSON array of {settings.images_per_article} strings, matching each section in 1:1 order."
     )
     try:
-        raw = await _call_openrouter(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
+        raw = await _call_groq(IMAGE_PROMPT_SYSTEM_PROMPT, user_prompt)
         prompts = extract_prompt_list(raw, expected_count=settings.images_per_article)
         if len(prompts) == settings.images_per_article:
             return prompts
+        else:
+            raise RuntimeError(
+                f"LLM generated {len(prompts)} image prompts, but exactly {settings.images_per_article} were required."
+            )
     except Exception as err:
-        logger.warning("generate_image_prompts LLM failed: %s. Using structured fallback prompts.", err)
+        logger.error("Image prompt generation stage failed: %s", err)
+        raise RuntimeError(f"Image prompt generation stage failed: {err}")
 
-    return _generate_fallback_image_prompts(title, article_html)
 
 

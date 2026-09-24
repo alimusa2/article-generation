@@ -20,41 +20,57 @@ async def _generate_one_image_from_account(
     client: httpx.AsyncClient, account_id: str, api_token: str, model: str, prompt: str
 ) -> bytes:
     url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
-    resp = await client.post(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0",
-        },
-        json={"prompt": prompt},
-        timeout=6.0,
-    )
-    resp.raise_for_status()
-    raw_content = resp.content
-    if raw_content.startswith(b"{"):
+    last_err = None
+    for attempt in range(1, 3):
         try:
-            data = resp.json()
-            if "result" in data and "image" in data["result"]:
-                b64_image = data["result"]["image"]
-                return base64.b64decode(b64_image)
-        except Exception:
-            pass
-    return raw_content
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0",
+                },
+                json={"prompt": prompt},
+                timeout=12.0,
+            )
+            if resp.status_code == 429:
+                raise httpx.HTTPStatusError("429 Quota/Rate Limit Exceeded", request=resp.request, response=resp)
+            resp.raise_for_status()
+
+            raw_content = resp.content
+            if not raw_content or len(raw_content) < 100:
+                raise ValueError(f"Cloudflare returned empty or invalid image payload ({len(raw_content)} bytes).")
+
+            if raw_content.startswith(b"{"):
+                data = resp.json()
+                if "result" in data and "image" in data["result"]:
+                    b64_image = data["result"]["image"]
+                    img_bytes = base64.b64decode(b64_image)
+                    if len(img_bytes) > 100:
+                        return img_bytes
+                if "errors" in data and data["errors"]:
+                    raise ValueError(f"Cloudflare AI API Error: {data['errors']}")
+                raise ValueError("Cloudflare JSON response did not contain valid image data.")
+
+            return raw_content
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2 and ("429" in str(exc) or "timeout" in str(exc).lower() or "50" in str(exc)):
+                await asyncio.sleep(1.0)
+                continue
+            break
+
+    raise RuntimeError(f"Cloudflare Account ({account_id[:6]}...) failed: {last_err}")
 
 
 async def generate_images(prompts: list[str]) -> tuple[list[bytes], str | None]:
     """
     Generates AI images using Cloudflare Workers AI with primary & secondary account fallback.
-    Supports ultra-efficient models (@cf/bytedance/stable-diffusion-xl-lightning) yielding 70-80+ images/day.
-    Batches execution in chunks of 4 images to stay safely within serverless timeout budgets.
-    Catches HTTP 429 daily free allocation limit on Account 1 and automatically falls back to Account 2.
-    Returns tuple of (list_of_image_bytes, last_error_message_if_any).
+    Validates HTTP status, image bytes, and size before proceeding.
+    Raises explicit RuntimeError if both Primary and Secondary accounts fail.
     """
-    from app.services.cloudinary_service import _create_procedural_ai_asset
-
     images: list[bytes] = []
-    encountered_error: str | None = None
+    notice_msg: str | None = None
 
     model = settings.cloudflare_image_model or "@cf/bytedance/stable-diffusion-xl-lightning"
     acc1 = settings.cloudflare_account_id
@@ -62,40 +78,53 @@ async def generate_images(prompts: list[str]) -> tuple[list[bytes], str | None]:
     acc2 = settings.cloudflare_account_id_2
     tok2 = settings.cloudflare_api_token_2
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    if not acc1 and not acc2:
+        raise RuntimeError("Missing required Cloudflare Workers AI production environment variables (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN).")
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
 
         async def _safe_gen(idx: int, prompt: str) -> tuple[bytes, str | None]:
-            nonlocal encountered_error
+            err1 = None
+            err2 = None
 
-            # Try Primary Cloudflare Account
+            # 1. Try Primary Cloudflare Account
             if acc1 and tok1:
                 try:
                     img_bytes = await _generate_one_image_from_account(client, acc1, tok1, model, prompt)
                     return img_bytes, None
                 except Exception as cf_err1:
+                    err1 = str(cf_err1)
                     logger.warning("Cloudflare Primary Account failed for prompt %d: %s. Trying Secondary Account...", idx, cf_err1)
 
-            # Try Secondary Cloudflare Account
+            # 2. Try Secondary Cloudflare Account
             if acc2 and tok2:
                 try:
                     img_bytes = await _generate_one_image_from_account(client, acc2, tok2, model, prompt)
-                    logger.info("Successfully generated image for prompt %d using Secondary Cloudflare Account!", idx)
+                    logger.info("Successfully generated image for prompt %d using Secondary Cloudflare Account fallback!", idx)
                     return img_bytes, "Used Secondary Cloudflare Account fallback."
                 except Exception as cf_err2:
+                    err2 = str(cf_err2)
                     logger.warning("Cloudflare Secondary Account failed for prompt %d: %s", idx, cf_err2)
 
-            err_msg = "Cloudflare Workers AI: Both accounts quota exhausted or unavailable. Used procedural 1000x700 studio design assets."
-            return _create_procedural_ai_asset(prompt, idx), err_msg
+            # 3. Both Accounts Failed -> Throw Real Error
+            err_parts = []
+            if err1:
+                err_parts.append(f"Primary Account: {err1}")
+            if err2:
+                err_parts.append(f"Secondary Account: {err2}")
+            full_err = "; ".join(err_parts) or "No valid Cloudflare credentials available."
+            raise RuntimeError(f"Cloudflare Workers AI image generation failed for image #{idx}: {full_err}")
 
-        # Batch into sub-groups of 4 images to keep execution fast and prevent timeouts
-        batch_size = 4
+        # Process 1 image per step for safe sub-2s execution on Vercel
+        batch_size = 1
         for batch_start in range(0, len(prompts), batch_size):
             batch_prompts = prompts[batch_start:batch_start + batch_size]
             tasks = [_safe_gen(batch_start + idx + 1, p) for idx, p in enumerate(batch_prompts)]
             batch_results = await asyncio.gather(*tasks)
-            for img_bytes, err in batch_results:
+            for img_bytes, notice in batch_results:
                 images.append(img_bytes)
-                if err and not encountered_error and "procedural" in err:
-                    encountered_error = err
+                if notice and not notice_msg:
+                    notice_msg = notice
 
-    return images, encountered_error
+    return images, notice_msg
+

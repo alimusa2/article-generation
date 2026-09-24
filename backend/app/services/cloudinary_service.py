@@ -33,11 +33,13 @@ def convert_bytes_to_avif_data_url(
     image_bytes: bytes, title: str = "", fallback_index: int = 1, used_urls: set[str] | None = None
 ) -> str:
     """Converts raw AI image bytes to 1000x700 AVIF format using Pillow."""
+    if not image_bytes or len(image_bytes) < 100:
+        raise ValueError("Invalid or empty image bytes passed to AVIF conversion.")
+
     try:
         img = Image.open(io.BytesIO(image_bytes))
         if img.size[0] <= 10 or img.size[1] <= 10:
-            ai_bytes = _create_procedural_ai_asset(title, fallback_index)
-            img = Image.open(io.BytesIO(ai_bytes))
+            raise ValueError(f"Image dimensions ({img.size}) are too small.")
 
         if img.mode not in ("RGB", "RGBA"):
             img = img.convert("RGB")
@@ -60,13 +62,8 @@ def convert_bytes_to_avif_data_url(
         b64 = base64.b64encode(avif_bytes).decode("utf-8")
         return f"data:image/avif;base64,{b64}"
     except Exception as e:
-        logger.warning("Local PIL image conversion failed: %s. Using procedural AI asset.", e)
-        ai_bytes = _create_procedural_ai_asset(title, fallback_index)
-        img = Image.open(io.BytesIO(ai_bytes)).resize((1000, 700))
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=85)
-        b64 = base64.b64encode(out.getvalue()).decode("utf-8")
-        return f"data:image/jpeg;base64,{b64}"
+        logger.error("PIL image conversion failed: %s", e)
+        raise RuntimeError(f"AVIF image conversion failed: {e}")
 
 
 def _compute_public_id(title: str, index: int, h2_title: str = "") -> str:
@@ -80,58 +77,52 @@ async def upload_image(
     image_bytes: bytes, title: str, index: int, h2_title: str = "", used_urls: set[str] | None = None
 ) -> dict[str, str]:
     """
-    Resizes AI image to 1000x700 locally, encodes to AVIF, and uploads to Cloudinary.
+    Resizes AI image to 1000x700 locally, encodes to AVIF, and uploads to Cloudinary if credentials present.
     Returns a dict containing 'secure_url', 'avif_url', and 'url'.
-    Guaranteed to never throw an uncaught exception.
     """
-    try:
-        avif_data_url = convert_bytes_to_avif_data_url(
-            image_bytes, title=h2_title or title, fallback_index=index, used_urls=used_urls
-        )
+    if not image_bytes or len(image_bytes) < 100:
+        raise ValueError(f"Cannot upload image #{index}: Empty or invalid image bytes.")
 
-        if settings.cloudinary_cloud_name and settings.cloudinary_upload_preset:
-            try:
-                public_id = _compute_public_id(title, index, h2_title)
-                url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload"
-                
-                # Extract converted 1000x700 AVIF bytes from base64 data URL
-                b64_str = avif_data_url.split(",", 1)[1]
-                real_avif_bytes = base64.b64decode(b64_str)
-                files = {"file": (f"{public_id}.avif", real_avif_bytes, "image/avif")}
-                data = {
-                    "public_id": public_id,
-                    "upload_preset": settings.cloudinary_upload_preset,
-                }
-                async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                    resp = await client.post(url, files=files, data=data)
-                    resp.raise_for_status()
-                    res_json = resp.json()
-                    secure_url = res_json.get("secure_url", "")
-                    raw_url = res_json.get("url", secure_url)
+    avif_data_url = convert_bytes_to_avif_data_url(
+        image_bytes, title=h2_title or title, fallback_index=index, used_urls=used_urls
+    )
 
-                avif_transformed_url = secure_url
-                if avif_transformed_url and not avif_transformed_url.endswith(".avif"):
-                    avif_transformed_url = re.sub(r"\.[a-zA-Z0-9]+$", ".avif", avif_transformed_url)
+    if settings.cloudinary_cloud_name and settings.cloudinary_upload_preset:
+        try:
+            public_id = _compute_public_id(title, index, h2_title)
+            url = f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload"
+            
+            # Extract converted 1000x700 AVIF bytes from base64 data URL
+            b64_str = avif_data_url.split(",", 1)[1]
+            real_avif_bytes = base64.b64decode(b64_str)
+            files = {"file": (f"{public_id}.avif", real_avif_bytes, "image/avif")}
+            data = {
+                "public_id": public_id,
+                "upload_preset": settings.cloudinary_upload_preset,
+            }
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                resp = await client.post(url, files=files, data=data)
+                resp.raise_for_status()
+                res_json = resp.json()
+                secure_url = res_json.get("secure_url", "")
+                raw_url = res_json.get("url", secure_url)
 
-                return {
-                    "secure_url": secure_url,
-                    "avif_url": avif_transformed_url,
-                    "url": raw_url,
-                }
-            except Exception as e:
-                logger.warning("Cloudinary upload failed: %s", e)
+            avif_transformed_url = secure_url
+            if avif_transformed_url and not avif_transformed_url.endswith(".avif"):
+                avif_transformed_url = re.sub(r"\.[a-zA-Z0-9]+$", ".avif", avif_transformed_url)
 
-        return {
-            "secure_url": avif_data_url,
-            "avif_url": avif_data_url,
-            "url": avif_data_url,
-        }
-    except Exception as e:
-        logger.warning("upload_image encountered error: %s", e)
-        avif_data_url = convert_bytes_to_avif_data_url(_create_procedural_ai_asset(title, index))
-        return {
-            "secure_url": avif_data_url,
-            "avif_url": avif_data_url,
-            "url": avif_data_url,
-        }
+            return {
+                "secure_url": secure_url,
+                "avif_url": avif_transformed_url,
+                "url": raw_url,
+            }
+        except Exception as e:
+            logger.warning("Cloudinary upload failed for image %d: %s. Using AVIF data URL fallback.", index, e)
+
+    return {
+        "secure_url": avif_data_url,
+        "avif_url": avif_data_url,
+        "url": avif_data_url,
+    }
+
 
