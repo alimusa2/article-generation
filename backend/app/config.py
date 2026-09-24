@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # --- App behavior ---
     images_per_article: int = 8
     h2_sections_per_article: int = 8
-    request_timeout_seconds: int = 25
+    request_timeout_seconds: int = 7
 
 
 settings = Settings()

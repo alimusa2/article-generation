@@ -118,14 +118,14 @@ async def _call_gemini_fallback(system_prompt: str, user_prompt: str) -> str:
 
 async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
     """
-    Calls Gemini 2.5 Flash as the primary fast LLM for instant sub-2s responses.
-    Falls back to OpenRouter if Gemini API key is missing or fails.
+    Calls Gemini as primary fast LLM. Falls back to OpenRouter if Gemini API key is missing or fails.
+    Uses strict sub-7s timeouts so requests never hit Vercel 504 Gateway Timeout.
     """
     if settings.gemini_api_key:
         try:
             return await _call_gemini_fallback(system_prompt, user_prompt)
         except Exception as gemini_err:
-            logger.warning("Gemini 2.5 Flash call error: %s. Trying OpenRouter...", gemini_err)
+            logger.warning("Gemini LLM error: %s. Trying OpenRouter...", gemini_err)
 
     if settings.openrouter_api_key:
         model = settings.openrouter_model or "openrouter/free"
@@ -135,7 +135,7 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
             "X-Title": "Article Generation Desk",
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=6.0) as client:
                 resp = await client.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,
@@ -159,10 +159,7 @@ async def _call_openrouter(system_prompt: str, user_prompt: str) -> str:
         except Exception as err:
             logger.warning("OpenRouter model '%s' error: %s", model, err)
 
-    if settings.gemini_api_key:
-        return await _call_gemini_fallback(system_prompt, user_prompt)
-
-    raise RuntimeError("All LLM API calls failed.")
+    raise RuntimeError("All LLM API calls failed or timed out.")
 
 
 def _generate_fallback_seo(article_html: str) -> tuple[SeoMetadata, str]:

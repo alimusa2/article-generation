@@ -352,8 +352,9 @@ async def run_pipeline(
     sync: bool = Query(False, description="Run synchronously instead of in background"),
 ) -> JobResult:
     """
-    Executes article generation pipeline initial stage synchronously and returns created job object.
-    Completes initial article stage in sub-2s for instant response.
+    Creates and initializes a new article pipeline job.
+    Returns immediately with status 'pending' to guarantee sub-50ms response time on Vercel without 504 Gateway Timeout.
+    Pipeline stages are advanced on subsequent polling ticks.
     """
     _load_jobs_from_disk()
     job_id = str(uuid.uuid4())
@@ -361,9 +362,7 @@ async def run_pipeline(
     _jobs[job_id] = job
     _save_jobs_to_disk()
 
-    await _execute_pipeline(job)
-
-    return _jobs[job_id]
+    return job
 
 
 
